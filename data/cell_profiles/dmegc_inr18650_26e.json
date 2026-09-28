@@ -1,0 +1,168 @@
+{
+  "id": "dmegc-inr18650-26e",
+  "status": "provisional",
+  "note": "Datasheet-class values are recorded with their source. OCV, resistance, RC terms and thermal values are provisional until bench tests T8 (OCV), T9 (pulse) and T12 (thermal) replace them. The UI shows a 'Provisional' badge while any field is not 'datasheet' or 'measured'. Sources disagree on some limits (see 'conflicts'); the most conservative value is used.",
+  "fields": {
+    "capacity_nominal_Ah": {
+      "value": 2.6,
+      "source": "datasheet",
+      "ref": "DMEGC INR18650-26E via ANSMANN spec sheet for a pack built on this cell (Rapid 18-4194): 2600 mAh at 0.2C to 2.5 V"
+    },
+    "capacity_min_Ah": {
+      "value": 2.5,
+      "source": "datasheet",
+      "ref": "Same sheet: minimum 2500 mAh at 0.2C"
+    },
+    "voltage_nominal_V": {
+      "value": 3.6,
+      "source": "datasheet",
+      "ref": "Same sheet (some sellers quote 3.65 V)"
+    },
+    "voltage_charge_V": {
+      "value": 4.2,
+      "source": "datasheet",
+      "ref": "Same sheet: 4.2 V \u00b1 50 mV"
+    },
+    "voltage_cutoff_V": {
+      "value": 2.5,
+      "source": "datasheet",
+      "ref": "Same sheet: capacity measured to 2.5 V; \u2265 2.75 V recommended for long life"
+    },
+    "charge_current_max_A": {
+      "value": 2.6,
+      "source": "datasheet",
+      "ref": "Same sheet: fast charge 2600 mA (1C); seller listings agree on 1C maximum"
+    },
+    "charge_end_current_A": {
+      "value": 0.026,
+      "source": "datasheet",
+      "ref": "Same sheet: 0.01C end-current cut-off"
+    },
+    "discharge_current_max_A": {
+      "value": 7.8,
+      "source": "datasheet",
+      "ref": "DMEGC product page, 18650-26E: 7.8 A (3C) discharge cycle; sellers claim up to 15\u201330 A, not used"
+    },
+    "charge_temperature_C": {
+      "value": [
+        0,
+        45
+      ],
+      "source": "datasheet",
+      "ref": "ANSMANN sheet"
+    },
+    "discharge_temperature_C": {
+      "value": [
+        -20,
+        60
+      ],
+      "source": "datasheet",
+      "ref": "ANSMANN sheet; avoid cell temperature above 60 \u00b0C"
+    },
+    "self_discharge_pct_per_month": {
+      "value": {
+        "20C": 2,
+        "30C": 5,
+        "40C": 10
+      },
+      "source": "datasheet",
+      "ref": "ANSMANN sheet (maximum values)"
+    },
+    "cycle_life": {
+      "value": "1000 cycles",
+      "source": "datasheet",
+      "ref": "DMEGC product page"
+    },
+    "mass_g": {
+      "value": 45,
+      "source": "listing",
+      "ref": "Seller listings (Rytronics); the ANSMANN pack weighs 52 g including its protection board"
+    },
+    "ocv_curve": {
+      "value": {
+        "soc": [
+          0.0,
+          0.05,
+          0.1,
+          0.15000000000000002,
+          0.2,
+          0.25,
+          0.30000000000000004,
+          0.35000000000000003,
+          0.4,
+          0.45,
+          0.5,
+          0.55,
+          0.6000000000000001,
+          0.65,
+          0.7000000000000001,
+          0.75,
+          0.8,
+          0.8500000000000001,
+          0.9,
+          0.9500000000000001,
+          1.0
+        ],
+        "ocv_V": [
+          2.5,
+          3.1094,
+          3.2959,
+          3.4339,
+          3.4852,
+          3.5286,
+          3.5814,
+          3.629,
+          3.667,
+          3.7054,
+          3.7509,
+          3.7983,
+          3.8406,
+          3.8896,
+          3.9479,
+          3.9943,
+          4.0421,
+          4.0809,
+          4.0967,
+          4.1236,
+          4.2
+        ]
+      },
+      "source": "provisional",
+      "ref": "PyBaMM Chen2020 full-cell OCV (LG M50, NMC811/graphite-SiOx), a different NMC cell, windowed 2.5\u20134.2 V. Replace with T8. Expect tens of mV deviation."
+    },
+    "r0_ohm": {
+      "value": 0.035,
+      "source": "assumed",
+      "ref": "No bare-cell impedance found in a manufacturer document (the ANSMANN \u2264 100 m\u03a9 includes its protection board). Placeholder; identify with T9."
+    },
+    "rc_pairs": {
+      "value": [
+        {
+          "R_ohm": 0.015,
+          "tau_s": 20
+        },
+        {
+          "R_ohm": 0.015,
+          "tau_s": 300
+        }
+      ],
+      "source": "assumed",
+      "ref": "Placeholder structure; identify with T9"
+    },
+    "thermal": {
+      "value": {
+        "C_core_J_per_K": 36,
+        "C_surf_J_per_K": 9,
+        "R_core_K_per_W": 4,
+        "R_surf_K_per_W": 7
+      },
+      "source": "assumed",
+      "ref": "Heat capacity from 45 g \u00d7 ~1.0 J/(g\u00b7K); split and resistances follow the two-node structure of Biju & Fang (arXiv:2211.05999) for another 18650. Refit with T12."
+    },
+    "conflicts": {
+      "value": "Maximum continuous discharge is quoted as 5 A (ANSMANN protected pack), 7.8 A (DMEGC), 13\u201330 A (sellers). Standard charge is quoted as 0.2C (ANSMANN) and 0.5C (sellers). This rig uses \u2264 1.25 A discharge and 2 A charge, inside every quoted limit.",
+      "source": "derived",
+      "ref": "comparison of the sources above"
+    }
+  }
+}

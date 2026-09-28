@@ -1,0 +1,1 @@
+timestamp_s,test_id,dac_code,i_cmd_a,ina1_current_a,ina1_bus_v,ina2_current_a,ina2_bus_v,ads48_ch0_code,ads48_ch1_code,ads49_ch0_code,ads49_ch1_code,tap1_v,tap2_v,tap3_v,tap4_v,cell1_v,cell2_v,cell3_v,cell4_v,t_cell_c,t_ambient_c,t_spare_c,dmm_ref_v,dmm_ref_a,bms_board_state,charge_relay,heatsink_t_c,note

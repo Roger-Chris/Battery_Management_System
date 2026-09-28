@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Battery Intelligence Platform: physics-based pack simulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E9EEF5;--surface:#FFFFFF;--surface-2:#F2F5FA;--line:#CFD8E5;--text:#15223A;--muted:#5B6B84;
+  --accent:#A8612F;--accent-ink:#FFFFFF;--ok:#1E8C7E;--warn:#B7791F;--bad:#C53A3F;--cobalt:#2F63B8;
+  --stage:#DCE4EF;--grid:#9FB0C8;
+  color-scheme:light;box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D1524;--surface:#131E33;--surface-2:#1A2742;--line:#27375A;--text:#E3E9F3;--muted:#8E9DB8;
+    --accent:#D08A55;--accent-ink:#1A1208;--ok:#3FB8A8;--warn:#F2B134;--bad:#EE5A5F;--cobalt:#5B92E0;
+    --stage:#0F1A2D;--grid:#3A4C6E;color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0D1524;--surface:#131E33;--surface-2:#1A2742;--line:#27375A;--text:#E3E9F3;--muted:#8E9DB8;
+  --accent:#D08A55;--accent-ink:#1A1208;--ok:#3FB8A8;--warn:#F2B134;--bad:#EE5A5F;--cobalt:#5B92E0;
+  --stage:#0F1A2D;--grid:#3A4C6E;color-scheme:dark;
+}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:'Barlow',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.45}
+.num{font-family:'Barlow Condensed','Arial Narrow',system-ui,sans-serif;font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+button{border:1px solid var(--line);background:var(--surface-2);border-radius:8px;padding:6px 11px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+button[aria-pressed="true"]{background:var(--text);color:var(--bg);border-color:var(--text)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+select{border:1px solid var(--line);background:var(--surface-2);border-radius:8px;padding:5px 9px;max-width:100%}
+.app{display:flex;flex-direction:column;height:100%}
+header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;padding:14px 20px 12px}
+h1{font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-weight:600;font-size:30px;line-height:1.05;margin:0}
+header.top p{margin:4px 0 0;color:var(--muted);max-width:70ch}
+.clock{text-align:right;white-space:nowrap}
+.clock .num{font-size:30px;line-height:1;display:block}
+.clock small{color:var(--muted)}
+main.grid{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 440px;grid-template-rows:minmax(0,1fr) auto;gap:12px;padding:0 12px 12px}
+.stage{grid-column:1;grid-row:1;position:relative;background:var(--stage);border-radius:16px;overflow:hidden;min-height:340px}
+.stage canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+.stage canvas.dragging{cursor:grabbing}
+.stage canvas.hovering{cursor:pointer}
+.overlay{position:absolute;pointer-events:none}
+.overlay > *{pointer-events:auto}
+.modes{top:12px;left:12px;display:flex;flex-wrap:wrap;gap:4px;background:color-mix(in srgb,var(--surface) 85%,transparent);padding:4px;border-radius:10px;border:1px solid var(--line);max-width:calc(100% - 290px)}
+.modes button{border:0;background:transparent;padding:5px 9px;font-size:14px}
+.modes button[aria-pressed="true"]{background:var(--text);color:var(--bg)}
+.legend{left:12px;bottom:12px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);background:color-mix(in srgb,var(--surface) 85%,transparent);padding:6px 10px;border-radius:10px;border:1px solid var(--line)}
+.legend .bar{width:130px;height:8px;border-radius:4px}
+.legend label{display:flex;gap:6px;align-items:center;margin-left:8px}
+.inspect{top:12px;right:12px;width:260px;background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:14px}
+.inspect h3{margin:0 0 6px;font-size:16px;font-weight:600}
+.inspect dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}
+.inspect dt{color:var(--muted)}
+.inspect dd{margin:0;text-align:right}
+.inspect .hint{color:var(--muted);margin:0}
+.chip{right:12px;bottom:12px;padding:6px 12px;border-radius:999px;font-weight:600;font-size:14px;border:1px solid var(--line);background:var(--surface)}
+.chip::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:1px;background:var(--ok)}
+.chip.open::before{background:var(--bad)}
+.tag3d{position:absolute;transform:translate(-50%,-100%);font-size:12px;font-weight:500;color:var(--text);background:color-mix(in srgb,var(--surface) 80%,transparent);border:1px solid var(--line);padding:1px 7px;border-radius:6px;white-space:nowrap;pointer-events:none}
+.tag3d.minor{font-size:11px;padding:0 5px;opacity:.9}
+.controls{grid-column:1;grid-row:2;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 14px}
+.controls label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px}
+.seg{display:flex;gap:2px;border:1px solid var(--line);border-radius:9px;padding:2px}
+.seg button{border:0;background:transparent;padding:4px 8px;border-radius:7px}
+.seg button[aria-pressed="true"]{background:var(--text);color:var(--bg)}
+.controls input[type=range]{accent-color:var(--accent);width:100px}
+.controls .spacer{flex:1}
+.panel{grid-column:2;grid-row:1 / 3;background:var(--surface);border:1px solid var(--line);border-radius:16px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.tabs{display:flex;border-bottom:1px solid var(--line);padding:6px 6px 0;gap:2px;overflow-x:auto}
+.tabs button{border:0;border-radius:8px 8px 0 0;background:transparent;padding:9px 10px;color:var(--muted);font-weight:500;white-space:nowrap;border-bottom:2px solid transparent}
+.tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+.tabs .badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:5px;border-radius:9px;background:var(--bad);color:#fff;font-size:12px;text-align:center}
+.pane{flex:1;overflow:auto;padding:16px 16px 20px}
+.pane[hidden]{display:none}
+.pane h2{font-size:17px;font-weight:600;margin:18px 0 8px}
+.pane h2:first-child{margin-top:0}
+.pane p{margin:0 0 10px;max-width:64ch}
+.muted{color:var(--muted)}
+.banner{border-radius:12px;padding:10px 12px;margin-bottom:14px;border:1px solid var(--line);background:var(--surface-2);display:flex;justify-content:space-between;gap:10px;align-items:center}
+.banner strong{font-size:16px}
+.banner.l1{border-color:var(--warn)} .banner.l2{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,var(--surface))} .banner.l3{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 18%,var(--surface))}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin:0}
+.metrics div{min-width:0}
+.metrics dt{color:var(--muted);font-size:13px}
+.metrics dd{margin:0;font-size:25px;line-height:1.1}
+.metrics dd small{font-size:14px;color:var(--muted);margin-left:3px}
+.legend-row{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--muted);margin:6px 0}
+.legend-row span::before{content:"";display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:3px;background:var(--c)}
+canvas.chart{width:100%;height:140px;display:block;background:var(--surface-2);border-radius:10px}
+.note{font-size:13px;color:var(--muted);border-left:3px solid var(--line);padding-left:10px;margin-top:12px}
+.fault-list{list-style:none;padding:0;margin:0;display:grid;gap:7px}
+.fault-list li{display:grid;grid-template-columns:1fr auto;gap:1px 10px;align-items:center;padding:7px 10px;border:1px solid var(--line);border-radius:10px}
+.fault-list li span{font-size:13px;color:var(--muted);grid-column:1}
+.fault-list li strong{font-weight:600;grid-column:1}
+.fault-list li button{grid-column:2;grid-row:1 / 3}
+.alerts{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.alerts li{padding:7px 10px;border-radius:8px;background:var(--surface-2);border-left:3px solid var(--warn);font-size:14px}
+.alerts li.trip{border-left-color:var(--bad)} .alerts li.sensor{border-left-color:var(--cobalt)}
+.alerts li.empty{border-left-color:var(--ok);color:var(--muted)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.devices{display:grid;gap:8px;list-style:none;padding:0;margin:0}
+.devices li{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.devices li span{color:var(--muted);font-size:13px}
+.devices li button{grid-row:1 / 3;grid-column:2}
+ol.handshake{margin:0;padding-left:20px;font-size:14px;display:grid;gap:4px}
+ol.handshake li.ok{color:var(--ok);font-weight:600} ol.handshake li.bad{color:var(--bad);font-weight:600}
+.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.session{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface-2)}
+.session.live{border-color:var(--ok)}
+.session p{margin:0 0 6px}
+.phone-view{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+.phone-view div{background:var(--surface);border-radius:8px;padding:6px 8px}
+.phone-view small{display:block;color:var(--muted);font-size:12px}
+.phone-view b{font-size:20px}
+.msg{font-size:14px;margin-top:8px}
+.msg.bad{color:var(--bad)} .msg.ok{color:var(--ok)}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:4px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--muted);font-weight:500;background:var(--surface-2)}
+td.r,th.r{text-align:right}
+tr:last-child td{border-bottom:0}
+td.st-bad{color:var(--bad);font-weight:600} td.st-ok{color:var(--ok)} td.st-warn{color:var(--warn);font-weight:600}
+td.lv-trip{color:var(--bad);font-weight:600} td.lv-anomaly{color:var(--warn);font-weight:600} td.lv-ble,td.lv-sensor{color:var(--cobalt)} td.lv-phys{color:var(--bad)}
+td.truth{color:var(--muted);font-style:italic}
+pre.schema{background:var(--surface-2);border-radius:10px;padding:10px;overflow-x:auto;margin:0 0 10px}
+.fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center;color:var(--muted)}
+.prov{font-size:14px;padding-left:18px;margin:0}
+.prov li{margin-bottom:6px}
+@media (max-width: 1000px){
+  body{height:auto}
+  .app{height:auto;min-height:100%}
+  header.top{padding:12px 14px 10px}
+  h1{font-size:25px}
+  main.grid{grid-template-columns:minmax(0,1fr);grid-template-rows:auto;padding:0 8px 12px}
+  .stage{grid-column:1;grid-row:auto;height:60vh;min-height:320px}
+  .controls{grid-column:1;grid-row:auto}
+  .panel{grid-column:1;grid-row:auto}
+  .pane{overflow:visible}
+  .inspect{width:200px;font-size:13px;top:auto;bottom:56px}
+  .modes{max-width:calc(100% - 24px)}
+  .legend .bar{width:70px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div>
+      <h1>Edge AI Battery Intelligence Platform</h1>
+      <p>Physics-based simulation of a 48 V, 13S8P light-EV pack of 104 LG M50 21700 cells, driven over real speed traces and monitored by a Raspberry Pi 5 edge node through 35 simulated sensor channels.</p>
+    </div>
+    <div class="clock"><span class="num" id="simTime">00:00:00</span><small>simulated time</small></div>
+  </header>
+  <main class="grid">
+    <section class="stage" id="stage" aria-label="3D view of the pack, sensors, edge node and phone">
+      <canvas id="three"></canvas>
+      <div id="tags"></div>
+      <div class="overlay modes" role="group" aria-label="Colour cells by">
+        <button data-mode="temp" aria-pressed="true">Core temperature</button>
+        <button data-mode="soc" aria-pressed="false">State of charge</button>
+        <button data-mode="current" aria-pressed="false">Cell current</button>
+        <button data-mode="voltage" aria-pressed="false">Group voltage</button>
+        <button data-mode="anomaly" aria-pressed="false">Anomaly score</button>
+      </div>
+      <div class="overlay legend"><span id="legMin" class="num"></span><div class="bar" id="legBar"></div><span id="legMax" class="num"></span><label><input type="checkbox" id="showTags" checked> Labels</label></div>
+      <div class="overlay inspect" id="inspect"></div>
+      <div class="overlay chip" id="contactorChip">Contactor closed</div>
+    </section>
+    <section class="controls" aria-label="Simulation controls">
+      <button class="primary" id="play">Pause</button>
+      <label>Speed
+        <span class="seg" role="group" aria-label="Simulation speed" id="speedSeg">
+          <button data-speed="1" aria-pressed="false">1×</button>
+          <button data-speed="10" aria-pressed="false">10×</button>
+          <button data-speed="60" aria-pressed="true">60×</button>
+          <button data-speed="120" aria-pressed="false">120×</button>
+          <button data-speed="300" aria-pressed="false">300×</button>
+        </span>
+        <span class="num" id="actualSpeed" title="Achieved speed">60×</span>
+      </label>
+      <label>Duty cycle <select id="profile"></select></label>
+      <label>Ambient <input type="range" id="amb" min="10" max="45" value="32" step="1"><span class="num" id="ambVal">32 °C</span></label>
+      <label>Start SOC <select id="soc0"><option value="0.9">90 %</option><option value="0.6">60 %</option><option value="0.3">30 %</option><option value="0.12">12 %</option></select></label>
+      <span class="spacer"></span>
+      <button id="restart">Restart simulation</button>
+    </section>
+    <aside class="panel" aria-label="Edge node dashboard">
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
+        <button role="tab" aria-selected="false" data-tab="sensors">Sensors</button>
+        <button role="tab" aria-selected="false" data-tab="faults">Faults<span class="badge" id="faultBadge" hidden>0</span></button>
+        <button role="tab" aria-selected="false" data-tab="ble">BLE access</button>
+        <button role="tab" aria-selected="false" data-tab="log">Data log</button>
+        <button role="tab" aria-selected="false" data-tab="model">Model</button>
+      </div>
+      <div class="pane" data-pane="overview" role="tabpanel">
+        <div class="banner" id="banner"><strong>Normal</strong><span id="bannerSub" class="muted"></span></div>
+        <dl class="metrics">
+          <div><dt>Vehicle speed</dt><dd class="num" id="mSpd">–</dd></div>
+          <div><dt>Pack power</dt><dd class="num" id="mP">–</dd></div>
+          <div><dt>Stack voltage</dt><dd class="num" id="mV">–</dd></div>
+          <div><dt>Current (shunt)</dt><dd class="num" id="mI">–</dd></div>
+          <div><dt>Hottest thermistor</dt><dd class="num" id="mT">–</dd></div>
+          <div><dt>Hottest cell core (truth)</dt><dd class="num" id="mTc">–</dd></div>
+          <div><dt>Energy use</dt><dd class="num" id="mE">–</dd></div>
+          <div><dt>Distance</dt><dd class="num" id="mD">–</dd></div>
+        </dl>
+        <h2>Vehicle speed</h2>
+        <div class="legend-row"><span style="--c:var(--muted)">Drive-cycle target</span><span style="--c:var(--accent)">Achieved</span></div>
+        <canvas class="chart" id="chartSpd"></canvas>
+        <h2>State of charge</h2>
+        <div class="legend-row"><span style="--c:var(--muted)">True (hidden from the edge node)</span><span style="--c:var(--accent)">Edge EKF estimate</span><span style="--c:var(--cobalt)">Coulomb counting</span></div>
+        <canvas class="chart" id="chartSoc"></canvas>
+        <p class="muted" style="margin-top:6px;font-size:13px" id="socErr"></p>
+        <h2>Pack current</h2>
+        <canvas class="chart" id="chartI"></canvas>
+        <p class="note">The edge node never sees the true state. It only reads the simulated sensors, with their offsets, noise, quantisation and lag, and runs its own simpler equivalent-circuit model. The EKF starts from a stale 70 % value, as after long storage. It stands in for the trained SOC model until that model is plugged in.</p>
+      </div>
+      <div class="pane" data-pane="sensors" role="tabpanel" hidden>
+        <p class="muted">Raw values are what the ADC or bus delivers; engineering values are what the edge node computes from them. Columns in italics are simulation truth, shown only for comparison.</p>
+        <h2>Cell-group voltages, 16-channel AFE</h2>
+        <div class="tablewrap"><table><thead><tr><th>Group</th><th class="r">Raw (mV)</th><th class="r">Truth (V)</th><th class="r">Balancing</th><th>Status</th></tr></thead><tbody id="sV"></tbody></table></div>
+        <h2>Thermistors, 10 kΩ NTC (B 3435) on 12-bit ADC</h2>
+        <div class="tablewrap"><table><thead><tr><th>ID</th><th>Location</th><th class="r">Counts</th><th class="r">°C</th><th class="r">Truth core °C</th><th>Status</th></tr></thead><tbody id="sT"></tbody></table></div>
+        <h2>Current, voltage and switching</h2>
+        <div class="tablewrap"><table><thead><tr><th>Sensor</th><th class="r">Raw</th><th class="r">Value</th><th class="r">Truth</th></tr></thead><tbody id="sI"></tbody></table></div>
+        <h2>Enclosure, motion and bus</h2>
+        <div class="tablewrap"><table><thead><tr><th>Sensor</th><th class="r">Value</th><th>Note</th></tr></thead><tbody id="sE"></tbody></table></div>
+      </div>
+      <div class="pane" data-pane="faults" role="tabpanel" hidden>
+        <div class="banner" id="banner2"><strong>Normal</strong><span class="muted" id="bannerSub2"></span></div>
+        <h2>Target</h2>
+        <div class="row"><label class="muted" for="fGroup">Group</label><select id="fGroup"></select><label class="muted" for="fCell">Cell</label><select id="fCell"></select><span class="muted" style="font-size:13px">or tap a cell in the 3D view</span></div>
+        <h2>Physical faults</h2>
+        <ul class="fault-list">
+          <li><strong>Soft internal short</strong><span>5 Ω inside the target cell: slow drain and warming</span><button data-fault="isc_soft">Inject</button></li>
+          <li><strong>Hard internal short</strong><span>50 mΩ: rapid self-heating, the physics decides whether it runs away</span><button data-fault="isc_hard">Inject</button></li>
+          <li><strong>External hot spot</strong><span>25 W heat source touching the target cell</span><button data-fault="heater">Inject</button></li>
+          <li><strong>Loose busbar</strong><span>+3 mΩ on the link after the target group</span><button data-fault="busbar">Inject</button></li>
+          <li><strong>Cracked tab weld</strong><span>20 mΩ in series with the target cell; current shifts to its neighbours</span><button data-fault="weld">Inject</button></li>
+          <li><strong>Crash</strong><span>26 g side impact; the target cell develops a latent short 45 s later</span><button data-fault="crash">Inject</button></li>
+          <li><strong>Welded contactor</strong><span>Main contactor stays closed when commanded open</span><button data-fault="contactor">Inject</button></li>
+          <li><strong>Charger loses CV control</strong><span>Keeps pushing current; use with a charging duty cycle</span><button data-fault="charger">Inject</button></li>
+        </ul>
+        <h2>Sensor faults</h2>
+        <div class="row" style="margin-bottom:8px"><label class="muted" for="fNtc">Thermistor</label><select id="fNtc"></select></div>
+        <ul class="fault-list">
+          <li><strong>Thermistor open</strong><span>Wire break; reads the bottom of the ADC range</span><button data-fault="ntc_open">Inject</button></li>
+          <li><strong>Thermistor short</strong><span>Reads the top of the ADC range</span><button data-fault="ntc_short">Inject</button></li>
+          <li><strong>Thermistor detached</strong><span>Falls off the cell and reads enclosure air</span><button data-fault="ntc_detached">Inject</button></li>
+          <li><strong>Voltage sense wire open</strong><span>On the target group's AFE channel</span><button data-fault="vsense">Inject</button></li>
+          <li><strong>Shunt offset drift</strong><span>+1.5 A offset in the current amplifier</span><button data-fault="shunt">Inject</button></li>
+          <li><strong>Hall sensor failure</strong><span>Redundant current sensor reads 0 A</span><button data-fault="hall">Inject</button></li>
+          <li><strong>H₂ sensor unplugged</strong><span>Early-warning gas channel lost</span><button data-fault="h2">Inject</button></li>
+        </ul>
+        <div class="row" style="margin-top:10px"><button id="repair">Repair reversible faults</button><span class="muted" style="font-size:13px">Vented or runaway cells stay damaged. Protection stays latched until a technician resets it over BLE.</span></div>
+        <h2>Active alerts</h2>
+        <ul class="alerts" id="alerts"></ul>
+        <h2>Anomaly score, worst group</h2>
+        <canvas class="chart" id="chartA"></canvas>
+        <h2>Enclosure gas</h2>
+        <div class="legend-row"><span style="--c:var(--bad)">H₂ (ppm, 0–100 shown)</span><span style="--c:var(--cobalt)">BME688 gas resistance (kΩ ÷ 1.3)</span></div>
+        <canvas class="chart" id="chartG"></canvas>
+        <p class="note">Warning levels: 1 abnormal heating (thermistor above 55 °C or rising faster than 3 °C per minute); 2 electrolyte off-gas in the enclosure; 3 hydrogen above 40 ppm, pressure rise above 1.5 kPa, or a thermistor above 90 °C rising faster than 1 °C per second. The group detector compares voltage, heating and self-discharge trend against the rest of the pack. It stands in for the trained anomaly model.</p>
+      </div>
+      <div class="pane" data-pane="ble" role="tabpanel" hidden>
+        <h2>Nearby devices</h2>
+        <ul class="devices" id="devices"></ul>
+        <h2>Handshake</h2>
+        <ol class="handshake" id="handshake"><li class="muted" style="list-style:none;margin-left:-20px">Connect a device to watch the challenge and response.</li></ol>
+        <h2>Session</h2>
+        <div class="session" id="session"><p class="muted">No device connected.</p></div>
+        <p class="note">Every connection gets a fresh random challenge, signed with HMAC-SHA256 using the device's registered key, computed here with the browser's Web Crypto. A captured response is useless for a new challenge. Three failed attempts lock that device ID for 30 s. Only the technician role can close the contactor after a trip, and the edge node refuses while the pack is hot, off-gassing or holds a vented cell.</p>
+      </div>
+      <div class="pane" data-pane="log" role="tabpanel" hidden>
+        <h2>Local SQLite store</h2>
+        <pre class="schema code">CREATE TABLE telemetry (ts REAL, pack_v REAL, current_a REAL,
+  soc_est REAL, t_max REAL, h2_ppm REAL, anomaly_max REAL);
+CREATE TABLE events (id INTEGER PRIMARY KEY, ts REAL,
+  level TEXT, grp INTEGER, message TEXT);</pre>
+        <p class="muted" id="rowCounts"></p>
+        <h2>Latest events</h2>
+        <div class="tablewrap"><table><thead><tr><th>Time</th><th>Level</th><th>Group</th><th>Message</th></tr></thead><tbody id="evRows"></tbody></table></div>
+        <h2>Latest telemetry rows</h2>
+        <div class="tablewrap"><table><thead><tr><th>ts</th><th>pack_v</th><th>current_a</th><th>soc_est</th><th>t_max</th><th>h2_ppm</th><th>anomaly_max</th></tr></thead><tbody id="telRows"></tbody></table></div>
+      </div>
+      <div class="pane" data-pane="model" role="tabpanel" hidden>
+        <h2>What is simulated</h2>
+        <p>Every one of the 104 cells runs its own single-particle electrochemical model: lithium diffusion in 20 radial shells per electrode, Butler–Volmer kinetics and measured open-circuit potentials, plus a lumped ohmic and electrolyte-polarisation term fitted to a full Doyle–Fuller–Newman model. Cells differ slightly in capacity and resistance, share current inside each parallel group, and heat through irreversible and entropic terms.</p>
+        <p>Each cell has a core and a surface temperature. Surfaces exchange heat with their neighbours by conduction and, when hot, radiation, and with the enclosure air, which couples to the aluminium housing and to ambient through speed-dependent convection. Above 60 °C the four decomposition reactions of the Kim et al. abuse model run in each cell; the vent opens at 130 °C, the separator fails at 170 °C and dumps the remaining charge through an internal short.</p>
+        <p>The scooter is a longitudinal-dynamics model: inertia, rolling resistance, aerodynamic drag and road grade, with a drive-efficiency map, a 3.2 kW motor limit and BMS-limited regenerative braking.</p>
+        <h2>Validation against PyBaMM, same cell</h2>
+        <div class="tablewrap"><table><thead><tr><th>Test</th><th class="r">RMSE</th><th class="r">Max error</th></tr></thead><tbody id="valRows"></tbody></table></div>
+        <h2>Held-out drive cycle: this model against the DFN reference</h2>
+        <div class="legend-row"><span style="--c:var(--muted)">PyBaMM DFN</span><span style="--c:var(--accent)">This simulation</span></div>
+        <canvas class="chart" id="chartVal" style="height:170px"></canvas>
+        <p class="muted" style="font-size:13px;margin-top:6px">30 minutes of WMTC Part 1 per-cell current from 90 % SOC at 25 °C, not used for fitting. The lumped terms were fitted only on constant-current and pulse tests.</p>
+        <h2>Where the numbers come from</h2>
+        <ul class="prov">
+          <li><strong>Cell parameters:</strong> Chen et al. (2020), J. Electrochem. Soc. 167, 080534, LG M50 21700, via the PyBaMM parameter set.</li>
+          <li><strong>Entropic coefficients and diffusion activation energies:</strong> O'Regan et al. (2022), Electrochim. Acta 425, 140700.</li>
+          <li><strong>Abuse kinetics:</strong> Kim, Pesaran and Spotnitz (2007), J. Power Sources 170, 476. Fitted for LiCoO₂ and graphite, so applied to this NMC cell only as an approximation.</li>
+          <li><strong>Speed traces:</strong> WMTC Part 1 and Part 2 (UN GTR No. 2, the two-wheeler cycle used for Indian type approval since BS IV) and a real recorded trip with road grade from NREL's Transportation Secure Data Center, both as shipped with NREL FASTSim.</li>
+          <li><strong>Assumed and representative:</strong> vehicle mass and drag, drive efficiency, thermal network conductances, gas yields, enclosure volume, and sensor error figures typical of each sensor class. These are editable estimates, not measurements.</li>
+        </ul>
+        <h2>Limits</h2>
+        <p class="muted">The single-particle model loses accuracy above about 1.5C; the 2C test shows it. Ageing, lithium plating, overcharge chemistry, flame and ejecta impingement are not modelled, so propagation between cells may be underestimated. Treat thermal runaway timing as qualitative.</p>
+      </div>
+    </aside>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/*__MODEL__*/
+</script>
+<script>
+/*__UI__*/
+</script>
+</body>
+</html>

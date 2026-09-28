@@ -1,0 +1,1228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Battery Intelligence Platform: physics-based pack simulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E9EEF5;--surface:#FFFFFF;--surface-2:#F2F5FA;--line:#CFD8E5;--text:#15223A;--muted:#5B6B84;
+  --accent:#A8612F;--accent-ink:#FFFFFF;--ok:#1E8C7E;--warn:#B7791F;--bad:#C53A3F;--cobalt:#2F63B8;
+  --stage:#DCE4EF;--grid:#9FB0C8;
+  color-scheme:light;box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D1524;--surface:#131E33;--surface-2:#1A2742;--line:#27375A;--text:#E3E9F3;--muted:#8E9DB8;
+    --accent:#D08A55;--accent-ink:#1A1208;--ok:#3FB8A8;--warn:#F2B134;--bad:#EE5A5F;--cobalt:#5B92E0;
+    --stage:#0F1A2D;--grid:#3A4C6E;color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0D1524;--surface:#131E33;--surface-2:#1A2742;--line:#27375A;--text:#E3E9F3;--muted:#8E9DB8;
+  --accent:#D08A55;--accent-ink:#1A1208;--ok:#3FB8A8;--warn:#F2B134;--bad:#EE5A5F;--cobalt:#5B92E0;
+  --stage:#0F1A2D;--grid:#3A4C6E;color-scheme:dark;
+}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:'Barlow',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.45}
+.num{font-family:'Barlow Condensed','Arial Narrow',system-ui,sans-serif;font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+button{border:1px solid var(--line);background:var(--surface-2);border-radius:8px;padding:6px 11px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+button[aria-pressed="true"]{background:var(--text);color:var(--bg);border-color:var(--text)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+select{border:1px solid var(--line);background:var(--surface-2);border-radius:8px;padding:5px 9px;max-width:100%}
+.app{display:flex;flex-direction:column;height:100%}
+header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;padding:14px 20px 12px}
+h1{font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-weight:600;font-size:30px;line-height:1.05;margin:0}
+header.top p{margin:4px 0 0;color:var(--muted);max-width:70ch}
+.clock{text-align:right;white-space:nowrap}
+.clock .num{font-size:30px;line-height:1;display:block}
+.clock small{color:var(--muted)}
+main.grid{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 440px;grid-template-rows:minmax(0,1fr) auto;gap:12px;padding:0 12px 12px}
+.stage{grid-column:1;grid-row:1;position:relative;background:var(--stage);border-radius:16px;overflow:hidden;min-height:340px}
+.stage canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+.stage canvas.dragging{cursor:grabbing}
+.stage canvas.hovering{cursor:pointer}
+.overlay{position:absolute;pointer-events:none}
+.overlay > *{pointer-events:auto}
+.modes{top:12px;left:12px;display:flex;flex-wrap:wrap;gap:4px;background:color-mix(in srgb,var(--surface) 85%,transparent);padding:4px;border-radius:10px;border:1px solid var(--line);max-width:calc(100% - 290px)}
+.modes button{border:0;background:transparent;padding:5px 9px;font-size:14px}
+.modes button[aria-pressed="true"]{background:var(--text);color:var(--bg)}
+.legend{left:12px;bottom:12px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);background:color-mix(in srgb,var(--surface) 85%,transparent);padding:6px 10px;border-radius:10px;border:1px solid var(--line)}
+.legend .bar{width:130px;height:8px;border-radius:4px}
+.legend label{display:flex;gap:6px;align-items:center;margin-left:8px}
+.inspect{top:12px;right:12px;width:260px;background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:14px}
+.inspect h3{margin:0 0 6px;font-size:16px;font-weight:600}
+.inspect dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:0}
+.inspect dt{color:var(--muted)}
+.inspect dd{margin:0;text-align:right}
+.inspect .hint{color:var(--muted);margin:0}
+.chip{right:12px;bottom:12px;padding:6px 12px;border-radius:999px;font-weight:600;font-size:14px;border:1px solid var(--line);background:var(--surface)}
+.chip::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:1px;background:var(--ok)}
+.chip.open::before{background:var(--bad)}
+.tag3d{position:absolute;transform:translate(-50%,-100%);font-size:12px;font-weight:500;color:var(--text);background:color-mix(in srgb,var(--surface) 80%,transparent);border:1px solid var(--line);padding:1px 7px;border-radius:6px;white-space:nowrap;pointer-events:none}
+.tag3d.minor{font-size:11px;padding:0 5px;opacity:.9}
+.controls{grid-column:1;grid-row:2;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 14px}
+.controls label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px}
+.seg{display:flex;gap:2px;border:1px solid var(--line);border-radius:9px;padding:2px}
+.seg button{border:0;background:transparent;padding:4px 8px;border-radius:7px}
+.seg button[aria-pressed="true"]{background:var(--text);color:var(--bg)}
+.controls input[type=range]{accent-color:var(--accent);width:100px}
+.controls .spacer{flex:1}
+.panel{grid-column:2;grid-row:1 / 3;background:var(--surface);border:1px solid var(--line);border-radius:16px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.tabs{display:flex;border-bottom:1px solid var(--line);padding:6px 6px 0;gap:2px;overflow-x:auto}
+.tabs button{border:0;border-radius:8px 8px 0 0;background:transparent;padding:9px 10px;color:var(--muted);font-weight:500;white-space:nowrap;border-bottom:2px solid transparent}
+.tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+.tabs .badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:5px;border-radius:9px;background:var(--bad);color:#fff;font-size:12px;text-align:center}
+.pane{flex:1;overflow:auto;padding:16px 16px 20px}
+.pane[hidden]{display:none}
+.pane h2{font-size:17px;font-weight:600;margin:18px 0 8px}
+.pane h2:first-child{margin-top:0}
+.pane p{margin:0 0 10px;max-width:64ch}
+.muted{color:var(--muted)}
+.banner{border-radius:12px;padding:10px 12px;margin-bottom:14px;border:1px solid var(--line);background:var(--surface-2);display:flex;justify-content:space-between;gap:10px;align-items:center}
+.banner strong{font-size:16px}
+.banner.l1{border-color:var(--warn)} .banner.l2{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,var(--surface))} .banner.l3{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 18%,var(--surface))}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin:0}
+.metrics div{min-width:0}
+.metrics dt{color:var(--muted);font-size:13px}
+.metrics dd{margin:0;font-size:25px;line-height:1.1}
+.metrics dd small{font-size:14px;color:var(--muted);margin-left:3px}
+.legend-row{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--muted);margin:6px 0}
+.legend-row span::before{content:"";display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:3px;background:var(--c)}
+canvas.chart{width:100%;height:140px;display:block;background:var(--surface-2);border-radius:10px}
+.note{font-size:13px;color:var(--muted);border-left:3px solid var(--line);padding-left:10px;margin-top:12px}
+.fault-list{list-style:none;padding:0;margin:0;display:grid;gap:7px}
+.fault-list li{display:grid;grid-template-columns:1fr auto;gap:1px 10px;align-items:center;padding:7px 10px;border:1px solid var(--line);border-radius:10px}
+.fault-list li span{font-size:13px;color:var(--muted);grid-column:1}
+.fault-list li strong{font-weight:600;grid-column:1}
+.fault-list li button{grid-column:2;grid-row:1 / 3}
+.alerts{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.alerts li{padding:7px 10px;border-radius:8px;background:var(--surface-2);border-left:3px solid var(--warn);font-size:14px}
+.alerts li.trip{border-left-color:var(--bad)} .alerts li.sensor{border-left-color:var(--cobalt)}
+.alerts li.empty{border-left-color:var(--ok);color:var(--muted)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.devices{display:grid;gap:8px;list-style:none;padding:0;margin:0}
+.devices li{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px}
+.devices li span{color:var(--muted);font-size:13px}
+.devices li button{grid-row:1 / 3;grid-column:2}
+ol.handshake{margin:0;padding-left:20px;font-size:14px;display:grid;gap:4px}
+ol.handshake li.ok{color:var(--ok);font-weight:600} ol.handshake li.bad{color:var(--bad);font-weight:600}
+.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.session{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface-2)}
+.session.live{border-color:var(--ok)}
+.session p{margin:0 0 6px}
+.phone-view{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+.phone-view div{background:var(--surface);border-radius:8px;padding:6px 8px}
+.phone-view small{display:block;color:var(--muted);font-size:12px}
+.phone-view b{font-size:20px}
+.msg{font-size:14px;margin-top:8px}
+.msg.bad{color:var(--bad)} .msg.ok{color:var(--ok)}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:4px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--muted);font-weight:500;background:var(--surface-2)}
+td.r,th.r{text-align:right}
+tr:last-child td{border-bottom:0}
+td.st-bad{color:var(--bad);font-weight:600} td.st-ok{color:var(--ok)} td.st-warn{color:var(--warn);font-weight:600}
+td.lv-trip{color:var(--bad);font-weight:600} td.lv-anomaly{color:var(--warn);font-weight:600} td.lv-ble,td.lv-sensor{color:var(--cobalt)} td.lv-phys{color:var(--bad)}
+td.truth{color:var(--muted);font-style:italic}
+pre.schema{background:var(--surface-2);border-radius:10px;padding:10px;overflow-x:auto;margin:0 0 10px}
+.fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center;color:var(--muted)}
+.prov{font-size:14px;padding-left:18px;margin:0}
+.prov li{margin-bottom:6px}
+@media (max-width: 1000px){
+  body{height:auto}
+  .app{height:auto;min-height:100%}
+  header.top{padding:12px 14px 10px}
+  h1{font-size:25px}
+  main.grid{grid-template-columns:minmax(0,1fr);grid-template-rows:auto;padding:0 8px 12px}
+  .stage{grid-column:1;grid-row:auto;height:60vh;min-height:320px}
+  .controls{grid-column:1;grid-row:auto}
+  .panel{grid-column:1;grid-row:auto}
+  .pane{overflow:visible}
+  .inspect{width:200px;font-size:13px;top:auto;bottom:56px}
+  .modes{max-width:calc(100% - 24px)}
+  .legend .bar{width:70px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div>
+      <h1>Edge AI Battery Intelligence Platform</h1>
+      <p>Physics-based simulation of a 48 V, 13S8P light-EV pack of 104 LG M50 21700 cells, driven over real speed traces and monitored by a Raspberry Pi 5 edge node through 35 simulated sensor channels.</p>
+    </div>
+    <div class="clock"><span class="num" id="simTime">00:00:00</span><small>simulated time</small></div>
+  </header>
+  <main class="grid">
+    <section class="stage" id="stage" aria-label="3D view of the pack, sensors, edge node and phone">
+      <canvas id="three"></canvas>
+      <div id="tags"></div>
+      <div class="overlay modes" role="group" aria-label="Colour cells by">
+        <button data-mode="temp" aria-pressed="true">Core temperature</button>
+        <button data-mode="soc" aria-pressed="false">State of charge</button>
+        <button data-mode="current" aria-pressed="false">Cell current</button>
+        <button data-mode="voltage" aria-pressed="false">Group voltage</button>
+        <button data-mode="anomaly" aria-pressed="false">Anomaly score</button>
+      </div>
+      <div class="overlay legend"><span id="legMin" class="num"></span><div class="bar" id="legBar"></div><span id="legMax" class="num"></span><label><input type="checkbox" id="showTags" checked> Labels</label></div>
+      <div class="overlay inspect" id="inspect"></div>
+      <div class="overlay chip" id="contactorChip">Contactor closed</div>
+    </section>
+    <section class="controls" aria-label="Simulation controls">
+      <button class="primary" id="play">Pause</button>
+      <label>Speed
+        <span class="seg" role="group" aria-label="Simulation speed" id="speedSeg">
+          <button data-speed="1" aria-pressed="false">1×</button>
+          <button data-speed="10" aria-pressed="false">10×</button>
+          <button data-speed="60" aria-pressed="true">60×</button>
+          <button data-speed="120" aria-pressed="false">120×</button>
+          <button data-speed="300" aria-pressed="false">300×</button>
+        </span>
+        <span class="num" id="actualSpeed" title="Achieved speed">60×</span>
+      </label>
+      <label>Duty cycle <select id="profile"></select></label>
+      <label>Ambient <input type="range" id="amb" min="10" max="45" value="32" step="1"><span class="num" id="ambVal">32 °C</span></label>
+      <label>Start SOC <select id="soc0"><option value="0.9">90 %</option><option value="0.6">60 %</option><option value="0.3">30 %</option><option value="0.12">12 %</option></select></label>
+      <span class="spacer"></span>
+      <button id="restart">Restart simulation</button>
+    </section>
+    <aside class="panel" aria-label="Edge node dashboard">
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
+        <button role="tab" aria-selected="false" data-tab="sensors">Sensors</button>
+        <button role="tab" aria-selected="false" data-tab="faults">Faults<span class="badge" id="faultBadge" hidden>0</span></button>
+        <button role="tab" aria-selected="false" data-tab="ble">BLE access</button>
+        <button role="tab" aria-selected="false" data-tab="log">Data log</button>
+        <button role="tab" aria-selected="false" data-tab="model">Model</button>
+      </div>
+      <div class="pane" data-pane="overview" role="tabpanel">
+        <div class="banner" id="banner"><strong>Normal</strong><span id="bannerSub" class="muted"></span></div>
+        <dl class="metrics">
+          <div><dt>Vehicle speed</dt><dd class="num" id="mSpd">–</dd></div>
+          <div><dt>Pack power</dt><dd class="num" id="mP">–</dd></div>
+          <div><dt>Stack voltage</dt><dd class="num" id="mV">–</dd></div>
+          <div><dt>Current (shunt)</dt><dd class="num" id="mI">–</dd></div>
+          <div><dt>Hottest thermistor</dt><dd class="num" id="mT">–</dd></div>
+          <div><dt>Hottest cell core (truth)</dt><dd class="num" id="mTc">–</dd></div>
+          <div><dt>Energy use</dt><dd class="num" id="mE">–</dd></div>
+          <div><dt>Distance</dt><dd class="num" id="mD">–</dd></div>
+        </dl>
+        <h2>Vehicle speed</h2>
+        <div class="legend-row"><span style="--c:var(--muted)">Drive-cycle target</span><span style="--c:var(--accent)">Achieved</span></div>
+        <canvas class="chart" id="chartSpd"></canvas>
+        <h2>State of charge</h2>
+        <div class="legend-row"><span style="--c:var(--muted)">True (hidden from the edge node)</span><span style="--c:var(--accent)">Edge EKF estimate</span><span style="--c:var(--cobalt)">Coulomb counting</span></div>
+        <canvas class="chart" id="chartSoc"></canvas>
+        <p class="muted" style="margin-top:6px;font-size:13px" id="socErr"></p>
+        <h2>Pack current</h2>
+        <canvas class="chart" id="chartI"></canvas>
+        <p class="note">The edge node never sees the true state. It only reads the simulated sensors, with their offsets, noise, quantisation and lag, and runs its own simpler equivalent-circuit model. The EKF starts from a stale 70 % value, as after long storage. It stands in for the trained SOC model until that model is plugged in.</p>
+      </div>
+      <div class="pane" data-pane="sensors" role="tabpanel" hidden>
+        <p class="muted">Raw values are what the ADC or bus delivers; engineering values are what the edge node computes from them. Columns in italics are simulation truth, shown only for comparison.</p>
+        <h2>Cell-group voltages, 16-channel AFE</h2>
+        <div class="tablewrap"><table><thead><tr><th>Group</th><th class="r">Raw (mV)</th><th class="r">Truth (V)</th><th class="r">Balancing</th><th>Status</th></tr></thead><tbody id="sV"></tbody></table></div>
+        <h2>Thermistors, 10 kΩ NTC (B 3435) on 12-bit ADC</h2>
+        <div class="tablewrap"><table><thead><tr><th>ID</th><th>Location</th><th class="r">Counts</th><th class="r">°C</th><th class="r">Truth core °C</th><th>Status</th></tr></thead><tbody id="sT"></tbody></table></div>
+        <h2>Current, voltage and switching</h2>
+        <div class="tablewrap"><table><thead><tr><th>Sensor</th><th class="r">Raw</th><th class="r">Value</th><th class="r">Truth</th></tr></thead><tbody id="sI"></tbody></table></div>
+        <h2>Enclosure, motion and bus</h2>
+        <div class="tablewrap"><table><thead><tr><th>Sensor</th><th class="r">Value</th><th>Note</th></tr></thead><tbody id="sE"></tbody></table></div>
+      </div>
+      <div class="pane" data-pane="faults" role="tabpanel" hidden>
+        <div class="banner" id="banner2"><strong>Normal</strong><span class="muted" id="bannerSub2"></span></div>
+        <h2>Target</h2>
+        <div class="row"><label class="muted" for="fGroup">Group</label><select id="fGroup"></select><label class="muted" for="fCell">Cell</label><select id="fCell"></select><span class="muted" style="font-size:13px">or tap a cell in the 3D view</span></div>
+        <h2>Physical faults</h2>
+        <ul class="fault-list">
+          <li><strong>Soft internal short</strong><span>5 Ω inside the target cell: slow drain and warming</span><button data-fault="isc_soft">Inject</button></li>
+          <li><strong>Hard internal short</strong><span>50 mΩ: rapid self-heating, the physics decides whether it runs away</span><button data-fault="isc_hard">Inject</button></li>
+          <li><strong>External hot spot</strong><span>25 W heat source touching the target cell</span><button data-fault="heater">Inject</button></li>
+          <li><strong>Loose busbar</strong><span>+3 mΩ on the link after the target group</span><button data-fault="busbar">Inject</button></li>
+          <li><strong>Cracked tab weld</strong><span>20 mΩ in series with the target cell; current shifts to its neighbours</span><button data-fault="weld">Inject</button></li>
+          <li><strong>Crash</strong><span>26 g side impact; the target cell develops a latent short 45 s later</span><button data-fault="crash">Inject</button></li>
+          <li><strong>Welded contactor</strong><span>Main contactor stays closed when commanded open</span><button data-fault="contactor">Inject</button></li>
+          <li><strong>Charger loses CV control</strong><span>Keeps pushing current; use with a charging duty cycle</span><button data-fault="charger">Inject</button></li>
+        </ul>
+        <h2>Sensor faults</h2>
+        <div class="row" style="margin-bottom:8px"><label class="muted" for="fNtc">Thermistor</label><select id="fNtc"></select></div>
+        <ul class="fault-list">
+          <li><strong>Thermistor open</strong><span>Wire break; reads the bottom of the ADC range</span><button data-fault="ntc_open">Inject</button></li>
+          <li><strong>Thermistor short</strong><span>Reads the top of the ADC range</span><button data-fault="ntc_short">Inject</button></li>
+          <li><strong>Thermistor detached</strong><span>Falls off the cell and reads enclosure air</span><button data-fault="ntc_detached">Inject</button></li>
+          <li><strong>Voltage sense wire open</strong><span>On the target group's AFE channel</span><button data-fault="vsense">Inject</button></li>
+          <li><strong>Shunt offset drift</strong><span>+1.5 A offset in the current amplifier</span><button data-fault="shunt">Inject</button></li>
+          <li><strong>Hall sensor failure</strong><span>Redundant current sensor reads 0 A</span><button data-fault="hall">Inject</button></li>
+          <li><strong>H₂ sensor unplugged</strong><span>Early-warning gas channel lost</span><button data-fault="h2">Inject</button></li>
+        </ul>
+        <div class="row" style="margin-top:10px"><button id="repair">Repair reversible faults</button><span class="muted" style="font-size:13px">Vented or runaway cells stay damaged. Protection stays latched until a technician resets it over BLE.</span></div>
+        <h2>Active alerts</h2>
+        <ul class="alerts" id="alerts"></ul>
+        <h2>Anomaly score, worst group</h2>
+        <canvas class="chart" id="chartA"></canvas>
+        <h2>Enclosure gas</h2>
+        <div class="legend-row"><span style="--c:var(--bad)">H₂ (ppm, 0–100 shown)</span><span style="--c:var(--cobalt)">BME688 gas resistance (kΩ ÷ 1.3)</span></div>
+        <canvas class="chart" id="chartG"></canvas>
+        <p class="note">Warning levels: 1 abnormal heating (thermistor above 55 °C or rising faster than 3 °C per minute); 2 electrolyte off-gas in the enclosure; 3 hydrogen above 40 ppm, pressure rise above 1.5 kPa, or a thermistor above 90 °C rising faster than 1 °C per second. The group detector compares voltage, heating and self-discharge trend against the rest of the pack. It stands in for the trained anomaly model.</p>
+      </div>
+      <div class="pane" data-pane="ble" role="tabpanel" hidden>
+        <h2>Nearby devices</h2>
+        <ul class="devices" id="devices"></ul>
+        <h2>Handshake</h2>
+        <ol class="handshake" id="handshake"><li class="muted" style="list-style:none;margin-left:-20px">Connect a device to watch the challenge and response.</li></ol>
+        <h2>Session</h2>
+        <div class="session" id="session"><p class="muted">No device connected.</p></div>
+        <p class="note">Every connection gets a fresh random challenge, signed with HMAC-SHA256 using the device's registered key, computed here with the browser's Web Crypto. A captured response is useless for a new challenge. Three failed attempts lock that device ID for 30 s. Only the technician role can close the contactor after a trip, and the edge node refuses while the pack is hot, off-gassing or holds a vented cell.</p>
+      </div>
+      <div class="pane" data-pane="log" role="tabpanel" hidden>
+        <h2>Local SQLite store</h2>
+        <pre class="schema code">CREATE TABLE telemetry (ts REAL, pack_v REAL, current_a REAL,
+  soc_est REAL, t_max REAL, h2_ppm REAL, anomaly_max REAL);
+CREATE TABLE events (id INTEGER PRIMARY KEY, ts REAL,
+  level TEXT, grp INTEGER, message TEXT);</pre>
+        <p class="muted" id="rowCounts"></p>
+        <h2>Latest events</h2>
+        <div class="tablewrap"><table><thead><tr><th>Time</th><th>Level</th><th>Group</th><th>Message</th></tr></thead><tbody id="evRows"></tbody></table></div>
+        <h2>Latest telemetry rows</h2>
+        <div class="tablewrap"><table><thead><tr><th>ts</th><th>pack_v</th><th>current_a</th><th>soc_est</th><th>t_max</th><th>h2_ppm</th><th>anomaly_max</th></tr></thead><tbody id="telRows"></tbody></table></div>
+      </div>
+      <div class="pane" data-pane="model" role="tabpanel" hidden>
+        <h2>What is simulated</h2>
+        <p>Every one of the 104 cells runs its own single-particle electrochemical model: lithium diffusion in 20 radial shells per electrode, Butler–Volmer kinetics and measured open-circuit potentials, plus a lumped ohmic and electrolyte-polarisation term fitted to a full Doyle–Fuller–Newman model. Cells differ slightly in capacity and resistance, share current inside each parallel group, and heat through irreversible and entropic terms.</p>
+        <p>Each cell has a core and a surface temperature. Surfaces exchange heat with their neighbours by conduction and, when hot, radiation, and with the enclosure air, which couples to the aluminium housing and to ambient through speed-dependent convection. Above 60 °C the four decomposition reactions of the Kim et al. abuse model run in each cell; the vent opens at 130 °C, the separator fails at 170 °C and dumps the remaining charge through an internal short.</p>
+        <p>The scooter is a longitudinal-dynamics model: inertia, rolling resistance, aerodynamic drag and road grade, with a drive-efficiency map, a 3.2 kW motor limit and BMS-limited regenerative braking.</p>
+        <h2>Validation against PyBaMM, same cell</h2>
+        <div class="tablewrap"><table><thead><tr><th>Test</th><th class="r">RMSE</th><th class="r">Max error</th></tr></thead><tbody id="valRows"></tbody></table></div>
+        <h2>Held-out drive cycle: this model against the DFN reference</h2>
+        <div class="legend-row"><span style="--c:var(--muted)">PyBaMM DFN</span><span style="--c:var(--accent)">This simulation</span></div>
+        <canvas class="chart" id="chartVal" style="height:170px"></canvas>
+        <p class="muted" style="font-size:13px;margin-top:6px">30 minutes of WMTC Part 1 per-cell current from 90 % SOC at 25 °C, not used for fitting. The lumped terms were fitted only on constant-current and pulse tests.</p>
+        <h2>Where the numbers come from</h2>
+        <ul class="prov">
+          <li><strong>Cell parameters:</strong> Chen et al. (2020), J. Electrochem. Soc. 167, 080534, LG M50 21700, via the PyBaMM parameter set.</li>
+          <li><strong>Entropic coefficients and diffusion activation energies:</strong> O'Regan et al. (2022), Electrochim. Acta 425, 140700.</li>
+          <li><strong>Abuse kinetics:</strong> Kim, Pesaran and Spotnitz (2007), J. Power Sources 170, 476. Fitted for LiCoO₂ and graphite, so applied to this NMC cell only as an approximation.</li>
+          <li><strong>Speed traces:</strong> WMTC Part 1 and Part 2 (UN GTR No. 2, the two-wheeler cycle used for Indian type approval since BS IV) and a real recorded trip with road grade from NREL's Transportation Secure Data Center, both as shipped with NREL FASTSim.</li>
+          <li><strong>Assumed and representative:</strong> vehicle mass and drag, drive efficiency, thermal network conductances, gas yields, enclosure volume, and sensor error figures typical of each sensor class. These are editable estimates, not measurements.</li>
+        </ul>
+        <h2>Limits</h2>
+        <p class="muted">The single-particle model loses accuracy above about 1.5C; the 2C test shows it. Ageing, lithium plating, overcharge chemistry, flame and ejecta impingement are not modelled, so propagation between cells may be underestimated. Treat thermal runaway timing as qualitative.</p>
+      </div>
+    </aside>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+/* ===== Electrochemical-thermal cell model: Single Particle Model, Chen2020 (LG M50 21700) ===== */
+const FARADAY=96485.33212, RGAS=8.314462618, TREF=298.15;
+const CELL={
+  cnMax:33133, cpMax:63104, Rn:5.86e-6, Rp:5.22e-6, Dn:3.3e-14, Dp:4e-15,
+  epsN:0.75, epsP:0.665, Ln:85.2e-6, Lp:75.6e-6, area:0.065*1.58, ce:1000,
+  x0:0.02634579, x100:0.91061805, y0:0.85397467, y100:0.26384522, Qnom:5.0,
+  EaDn:2092*RGAS, EaDp:1449*RGAS, Ej0n:35000, Ej0p:17800,
+  Rohm:0.0, Re:0.0, tauE:60, NSH:20
+};
+function Un(x){return 1.9793*Math.exp(-39.3631*x)+0.2482-0.0909*Math.tanh(29.8538*(x-0.1234))-0.04478*Math.tanh(14.9159*(x-0.2769))-0.0205*Math.tanh(30.4444*(x-0.6103));}
+function Up(y){return -0.8090*y+4.4875-0.0428*Math.tanh(18.5138*(y-0.5542))-17.7326*Math.tanh(15.7890*(y-0.3117))+17.5842*Math.tanh(15.9308*(y-0.3120));}
+function dUnDT(x){return (-0.1112*x+0.02914+0.3561*Math.exp(-((x-0.08309)**2)/0.004616))/1000;}
+function dUpDT(y){return (0.04006*Math.exp(-((y-0.2828)**2)/0.0009855)-0.06656*Math.exp(-((y-0.8032)**2)/0.02179))/1000;}
+const arr=(Ea,T)=>Math.exp(Ea/RGAS*(1/TREF-1/T));
+
+// particle geometry (precomputed)
+function makeGeom(R,N){
+  const dr=R/N,V=[],Af=[];
+  for(let i=0;i<N;i++){V.push(4/3*Math.PI*(((i+1)*dr)**3-(i*dr)**3));Af.push(4*Math.PI*((i+1)*dr)**2);}
+  return {dr,V,Af,N};
+}
+const GN=makeGeom(CELL.Rn,CELL.NSH), GP=makeGeom(CELL.Rp,CELL.NSH);
+const AL_N=3*CELL.epsN/CELL.Rn*CELL.Ln*CELL.area, AL_P=3*CELL.epsP/CELL.Rp*CELL.Lp*CELL.area; // total particle surface [m2]
+
+// implicit (backward Euler) finite-volume diffusion step, flux Nout [mol/m2/s] outward at surface
+const _a=new Float64Array(32),_b=new Float64Array(32),_c=new Float64Array(32),_d=new Float64Array(32);
+function diffuse(c,G,D,Nout,dt){
+  const N=G.N,dr=G.dr;
+  for(let i=0;i<N;i++){
+    const kl=i>0?D*G.Af[i-1]/dr:0, ku=i<N-1?D*G.Af[i]/dr:0;
+    _a[i]=-kl;_c[i]=-ku;_b[i]=G.V[i]/dt+kl+ku;_d[i]=G.V[i]/dt*c[i]-(i===N-1?G.Af[N-1]*Nout:0);
+  }
+  for(let i=1;i<N;i++){const m=_a[i]/_b[i-1];_b[i]-=m*_c[i-1];_d[i]-=m*_d[i-1];}
+  c[N-1]=_d[N-1]/_b[N-1];
+  for(let i=N-2;i>=0;i--)c[i]=(_d[i]-_c[i]*c[i+1])/_b[i];
+}
+function surf(c,G,D,Nout){return c[G.N-1]-Nout*(G.dr/2)/D;}
+function avg(c,G){let s=0,v=0;for(let i=0;i<G.N;i++){s+=c[i]*G.V[i];v+=G.V[i];}return s/v;}
+
+function newCell(soc,opts={}){
+  const capF=opts.capF||1;
+  const x=CELL.x0+soc*(CELL.x100-CELL.x0), y=CELL.y0+soc*(CELL.y100-CELL.y0);
+  return {cn:new Float64Array(CELL.NSH).fill(x*CELL.cnMax),cp:new Float64Array(CELL.NSH).fill(y*CELL.cpMax),
+    capF, rF:opts.rF||1, Rohm:(opts.Rohm!=null?opts.Rohm:CELL.Rohm), Tc:opts.T||TREF, Ts:opts.T||TREF,
+    I:0,ve:0,V:Up(y)-Un(x),Q:0,Risc:Infinity,alive:true,vented:false,
+    sei:0.15,ne:0.75,tsei:0.033,pe:0.04,el:1.0, qAbuse:0, gas:0};
+}
+// electrochemical state -> voltage for a given cell current I (A, +discharge) at temperature T
+function cellVoltage(cell,I,T){
+  const Ie=I/cell.capF;                       // capacity scaling = more/less electrode area
+  const jn=Ie/AL_N, jp=-Ie/AL_P;              // A/m2
+  const Dn=CELL.Dn*arr(CELL.EaDn,T), Dp=CELL.Dp*arr(CELL.EaDp,T);
+  const csn=Math.min(CELL.cnMax-1,Math.max(1,surf(cell.cn,GN,Dn,jn/FARADAY)));
+  const csp=Math.min(CELL.cpMax-1,Math.max(1,surf(cell.cp,GP,Dp,jp/FARADAY)));
+  const j0n=6.48e-7*arr(CELL.Ej0n,T)*Math.sqrt(CELL.ce*csn*(CELL.cnMax-csn));
+  const j0p=3.42e-6*arr(CELL.Ej0p,T)*Math.sqrt(CELL.ce*csp*(CELL.cpMax-csp));
+  const k=2*RGAS*T/FARADAY;
+  const etan=k*Math.asinh(jn/(2*j0n)), etap=k*Math.asinh(jp/(2*j0p));
+  const U=Up(csp/CELL.cpMax)-Un(csn/CELL.cnMax);
+  const V=U+etap-etan-I*cell.Rohm*cell.rF*rohmT(T)-cell.ve;
+  // small-signal resistance dV/dI
+  const dn=k/Math.sqrt(1+(jn/(2*j0n))**2)/(2*j0n)/AL_N/cell.capF;
+  const dp=k/Math.sqrt(1+(jp/(2*j0p))**2)/(2*j0p)/AL_P/cell.capF;
+  return {V,U,Rs:dn+dp+cell.Rohm*cell.rF*rohmT(T)+CELL.Re*cell.rF*rohmT(T)*(1-Math.exp(-1/CELL.tauE))};
+}
+function rohmT(T){return Math.exp(1800*(1/T-1/TREF));} // electrolyte/contact resistance temperature dependence (Arrhenius-like)
+function advanceCell(cell,I,T,dt){
+  const Ie=I/cell.capF;
+  const Dn=CELL.Dn*arr(CELL.EaDn,T), Dp=CELL.Dp*arr(CELL.EaDp,T);
+  diffuse(cell.cn,GN,Dn,(Ie/AL_N)/FARADAY,dt);
+  const e=Math.exp(-dt/CELL.tauE); cell.ve=cell.ve*e+I*CELL.Re*cell.rF*rohmT(T)*(1-e);
+  diffuse(cell.cp,GP,Dp,(-Ie/AL_P)/FARADAY,dt);
+}
+function cellSOC(cell){return (avg(cell.cn,GN)/CELL.cnMax-CELL.x0)/(CELL.x100-CELL.x0);}
+function cellOCVbulk(cell){return Up(avg(cell.cp,GP)/CELL.cpMax)-Un(avg(cell.cn,GN)/CELL.cnMax);}
+function cellEntropic(cell){return dUpDT(avg(cell.cp,GP)/CELL.cpMax)-dUnDT(avg(cell.cn,GN)/CELL.cnMax);}
+
+// Scooter longitudinal dynamics. Parameters are representative of an Indian 2-3 kW e-scooter class (assumed, editable)
+const VEH={m:115,rider:75,Crr:0.012,CdA:0.62,rho:1.16,rotI:0.04,etaDrive:0.86,regenFrac:0.55,Pmax:3200,Paux:35,vmax:19.4};
+function wheelForce(v,a,grade){const m=VEH.m+VEH.rider;const th=Math.atan(grade||0);
+ return m*(1+VEH.rotI)*a+m*9.81*VEH.Crr*Math.cos(th)*(v>0.05?1:0)+0.5*VEH.rho*VEH.CdA*v*v+m*9.81*Math.sin(th);}
+function motorEff(v,P){const base=VEH.etaDrive-0.18*Math.exp(-v/2.5);const load=Math.abs(P)/VEH.Pmax;return Math.max(0.55,base-0.08*Math.exp(-load/0.08));}
+function battPower(v,a,grade){const F=wheelForce(v,a,grade);const Pw=F*v;const eta=motorEff(v,Pw);
+ return Pw>=0?Pw/eta+VEH.Paux:Pw*eta*VEH.regenFrac+VEH.Paux;}
+function loadCycle(text){const L=text.trim().split(/\r?\n/);const h=L[0].replace(/^\ufeff/,'').split(',');const gi=h.findIndex(x=>/grade/i.test(x));
+ return L.slice(1).map(l=>{const p=l.split(',');return {t:+p[0],v:+p[1],g:gi>=0?+p[gi]:0};});}
+
+const CYC={"wmtc1":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.278,0.722,1.333,2.0,2.667,3.333,3.972,4.611,5.25,5.889,6.528,7.111,7.528,7.778,7.972,8.111,8.278,8.444,8.222,7.972,7.75,7.639,7.583,7.611,7.639,7.667,7.667,7.667,7.694,7.722,7.806,7.944,8.056,8.111,8.194,8.25,8.361,8.472,8.528,8.25,7.5,6.389,5.194,3.944,2.611,1.361,0.556,0.0,0.0,0.0,0.0,0.0,0.472,1.611,3.278,5.083,6.806,8.167,9.028,9.5,9.556,9.583,9.611,9.639,9.667,9.778,10.0,10.278,10.528,10.722,10.778,10.778,10.75,10.694,10.556,10.389,10.25,10.167,10.111,10.111,10.139,10.194,10.25,10.278,10.333,10.361,10.389,10.361,10.222,9.944,9.639,8.833,8.028,7.417,6.833,7.0,7.278,7.667,8.111,8.611,9.111,9.528,9.75,9.806,9.75,9.611,9.361,8.944,8.222,7.222,6.111,5.139,4.611,4.889,5.833,7.0,8.083,8.722,8.861,8.722,8.5,8.194,7.778,6.917,5.611,4.111,2.639,1.333,0.389,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.556,1.667,3.444,5.944,8.333,10.306,11.806,12.944,13.833,14.556,15.111,15.444,15.583,15.611,15.611,15.611,15.75,15.889,16.028,16.167,16.306,16.472,16.611,16.667,16.667,16.639,16.639,16.639,16.639,16.639,16.611,16.556,16.417,15.861,14.778,13.417,12.194,11.194,10.972,11.472,12.556,13.917,14.917,15.5,15.5,15.194,14.806,14.528,14.444,14.472,14.389,14.111,13.667,13.194,12.694,12.194,11.667,11.167,10.639,10.111,9.611,9.083,8.5,7.806,7.083,6.417,5.889,5.417,4.944,4.25,3.194,2.0,0.694,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.139,0.806,2.278,3.667,4.944,5.944,6.694,7.333,7.889,8.306,8.472,8.472,8.417,8.389,8.361,8.361,8.361,8.361,8.361,8.361,8.389,8.444,8.611,8.833,9.083,9.333,9.556,9.722,9.833,9.861,9.806,9.694,9.417,9.0,8.5,8.028,7.722,7.556,7.472,7.361,7.25,7.139,7.083,7.139,7.333,7.583,7.806,7.75,7.222,6.306,5.278,4.444,4.056,4.222,4.694,5.361,6.111,6.833,7.444,7.75,7.806,7.694,7.556,7.444,7.389,7.444,7.5,7.556,7.611,7.667,7.694,7.75,7.806,7.861,7.944,8.056,8.222,8.361,8.472,8.528,8.556,8.556,8.556,8.556,8.556,8.556,8.556,8.583,8.583,8.583,8.556,8.444,8.222,7.889,7.528,7.222,7.056,7.083,7.306,7.583,7.889,8.111,8.194,8.194,8.056,7.806,7.556,7.306,7.139,7.083,7.111,7.222,7.333,7.5,7.694,7.917,8.167,8.389,8.472,8.417,8.194,7.972,7.75,7.639,7.583,7.5,7.361,7.167,6.944,5.972,4.444,2.778,1.389,0.611,0.278,0.0,0.0,0.0,0.0,0.0,0.0,0.333,0.889,1.639,2.444,3.333,4.278,5.25,6.139,6.889,7.444,7.972,8.5,9.0,9.444,9.833,10.139,10.417,10.722,11.028,11.306,11.528,11.583,11.528,11.389,11.278,11.194,11.167,11.139,11.056,10.806,10.417,9.944,9.5,9.028,8.583,8.167,7.778,7.361,6.944,6.528,6.083,5.667,5.389,5.222,5.111,5.0,4.861,4.694,4.556,4.611,4.917,5.389,5.806,6.194,6.444,6.444,6.167,5.639,4.972,4.222,3.417,2.583,1.778,1.056,0.556,0.25,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.389,1.25,2.444,3.722,4.806,5.333,5.472,5.5,5.75,6.556,7.806,9.111,10.083,10.306,9.75,8.639,7.778,7.639,8.194,9.444,10.278,10.556,10.028,8.75,6.806,4.861,2.917,1.25,0.278,0.0,0.0,0.0,0.0,0.806,2.222,4.444,6.667,8.889,10.778,11.972,12.778,13.194,13.194,12.444,11.139,9.389,7.556,5.556,3.556,1.944,0.611,0.0,0.0,0.0,0.0,0.0,0.75,2.222,4.444,6.667,8.889,10.333,11.222,11.972,12.389,12.556,12.583,12.611,12.639,12.667,12.694,12.722,12.75,12.778,12.806,12.833,12.861,12.889,12.972,13.111,13.333,13.583,13.833,14.028,14.167,14.194,14.167,14.0,13.611,12.972,12.222,11.417,10.639,9.833,8.833,7.583,6.222,4.917,3.722,2.583,1.528,0.556,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"w12":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.278,0.722,1.333,2.0,2.667,3.333,3.972,4.611,5.25,5.889,6.528,7.111,7.528,7.778,7.972,8.111,8.278,8.444,8.222,7.972,7.75,7.639,7.583,7.611,7.639,7.667,7.667,7.667,7.694,7.722,7.806,7.944,8.056,8.111,8.194,8.25,8.361,8.472,8.528,8.25,7.5,6.389,5.194,3.944,2.611,1.361,0.556,0.0,0.0,0.0,0.0,0.0,0.472,1.611,3.278,5.083,6.806,8.167,9.028,9.5,9.556,9.583,9.611,9.639,9.667,9.778,10.0,10.278,10.528,10.722,10.778,10.778,10.75,10.694,10.556,10.389,10.25,10.167,10.111,10.111,10.139,10.194,10.25,10.278,10.333,10.361,10.389,10.361,10.222,9.944,9.639,8.833,8.028,7.417,6.833,7.0,7.278,7.667,8.111,8.611,9.111,9.528,9.75,9.806,9.75,9.611,9.361,8.944,8.222,7.222,6.111,5.139,4.611,4.889,5.833,7.0,8.083,8.722,8.861,8.722,8.5,8.194,7.778,6.917,5.611,4.111,2.639,1.333,0.389,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.556,1.667,3.444,5.944,8.333,10.306,11.806,12.944,13.833,14.556,15.111,15.444,15.583,15.611,15.611,15.611,15.75,15.889,16.028,16.167,16.306,16.472,16.611,16.667,16.667,16.639,16.639,16.639,16.639,16.639,16.611,16.556,16.417,15.861,14.778,13.417,12.194,11.194,10.972,11.472,12.556,13.917,14.917,15.5,15.5,15.194,14.806,14.528,14.444,14.472,14.389,14.111,13.667,13.194,12.694,12.194,11.667,11.167,10.639,10.111,9.611,9.083,8.5,7.806,7.083,6.417,5.889,5.417,4.944,4.25,3.194,2.0,0.694,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.139,0.806,2.278,3.667,4.944,5.944,6.694,7.333,7.889,8.306,8.472,8.472,8.417,8.389,8.361,8.361,8.361,8.361,8.361,8.361,8.389,8.444,8.611,8.833,9.083,9.333,9.556,9.722,9.833,9.861,9.806,9.694,9.417,9.0,8.5,8.028,7.722,7.556,7.472,7.361,7.25,7.139,7.083,7.139,7.333,7.583,7.806,7.75,7.222,6.306,5.278,4.444,4.056,4.222,4.694,5.361,6.111,6.833,7.444,7.75,7.806,7.694,7.556,7.444,7.389,7.444,7.5,7.556,7.611,7.667,7.694,7.75,7.806,7.861,7.944,8.056,8.222,8.361,8.472,8.528,8.556,8.556,8.556,8.556,8.556,8.556,8.556,8.583,8.583,8.583,8.556,8.444,8.222,7.889,7.528,7.222,7.056,7.083,7.306,7.583,7.889,8.111,8.194,8.194,8.056,7.806,7.556,7.306,7.139,7.083,7.111,7.222,7.333,7.5,7.694,7.917,8.167,8.389,8.472,8.417,8.194,7.972,7.75,7.639,7.583,7.5,7.361,7.167,6.944,5.972,4.444,2.778,1.389,0.611,0.278,0.0,0.0,0.0,0.0,0.0,0.0,0.333,0.889,1.639,2.444,3.333,4.278,5.25,6.139,6.889,7.444,7.972,8.5,9.0,9.444,9.833,10.139,10.417,10.722,11.028,11.306,11.528,11.583,11.528,11.389,11.278,11.194,11.167,11.139,11.056,10.806,10.417,9.944,9.5,9.028,8.583,8.167,7.778,7.361,6.944,6.528,6.083,5.667,5.389,5.222,5.111,5.0,4.861,4.694,4.556,4.611,4.917,5.389,5.806,6.194,6.444,6.444,6.167,5.639,4.972,4.222,3.417,2.583,1.778,1.056,0.556,0.25,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.389,1.25,2.444,3.722,4.806,5.333,5.472,5.5,5.75,6.556,7.806,9.111,10.083,10.306,9.75,8.639,7.778,7.639,8.194,9.444,10.278,10.556,10.028,8.75,6.806,4.861,2.917,1.25,0.278,0.0,0.0,0.0,0.0,0.806,2.222,4.444,6.667,8.889,10.778,11.972,12.778,13.194,13.194,12.444,11.139,9.389,7.556,5.556,3.556,1.944,0.611,0.0,0.0,0.0,0.0,0.0,0.75,2.222,4.444,6.667,8.889,10.333,11.222,11.972,12.389,12.556,12.583,12.611,12.639,12.667,12.694,12.722,12.75,12.778,12.806,12.833,12.861,12.889,12.972,13.111,13.333,13.583,13.833,14.028,14.167,14.194,14.167,14.0,13.611,12.972,12.222,11.417,10.639,9.833,8.833,7.583,6.222,4.917,3.722,2.583,1.528,0.556,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.639,2.028,4.222,6.639,9.028,10.889,12.25,13.361,14.222,14.806,15.139,15.472,15.806,15.972,16.111,16.222,16.25,16.25,16.278,16.361,16.472,16.611,16.722,16.806,16.889,16.972,17.083,17.222,17.361,17.5,17.611,17.694,17.722,17.75,17.722,17.556,17.139,16.361,15.333,14.167,12.972,11.889,11.167,10.778,10.528,10.194,9.75,9.139,8.444,7.778,7.194,6.778,6.583,6.611,6.944,7.583,8.444,9.417,10.361,11.056,10.972,10.083,8.722,7.361,6.722,6.889,7.389,7.639,7.444,7.028,6.667,6.472,6.583,6.917,7.333,7.694,7.861,7.861,7.806,7.806,7.944,8.278,8.778,9.417,10.139,10.861,11.528,12.028,12.361,12.528,12.528,12.194,11.5,10.667,9.861,9.139,8.694,8.528,8.611,8.944,9.444,10.0,10.528,11.083,11.556,11.972,12.306,12.5,12.639,12.722,12.778,12.806,12.833,12.806,12.694,12.5,12.306,12.417,13.0,13.917,14.889,15.806,16.5,16.722,16.472,15.972,15.389,14.583,13.306,11.5,9.556,8.333,7.5,7.361,7.972,9.389,11.194,12.944,14.0,15.0,15.806,16.417,16.833,17.139,17.389,17.528,17.472,17.139,16.5,15.722,14.917,14.083,13.25,12.5,11.972,11.639,11.556,11.472,11.361,11.611,11.694,11.611,11.472,11.528,12.083,12.917,13.806,14.611,15.278,15.694,15.861,15.917,15.833,15.639,15.333,14.972,14.611,14.278,13.917,14.306,14.75,15.222,15.722,16.25,16.833,17.444,18.028,18.611,19.194,19.694,20.056,20.222,20.222,19.972,19.583,19.111,18.639,18.167,17.75,17.444,17.167,16.944,16.778,16.667,16.722,17.056,17.583,18.194,18.722,19.028,19.083,18.917,18.694,18.472,18.306,18.194,18.028,17.806,17.5,17.25,17.111,17.139,17.306,17.639,18.139,18.694,19.25,19.833,20.417,21.0,21.583,22.139,22.639,23.083,23.5,23.889,24.278,24.639,24.889,25.056,25.194,25.333,25.5,25.667,25.833,26.0,26.139,26.194,26.222,26.222,26.194,26.194,26.167,26.167,26.167,26.139,26.111,26.111,26.083,26.083,26.083,26.083,26.083,26.111,26.111,26.139,26.167,26.194,26.222,26.25,26.25,26.25,26.25,26.222,26.25,26.278,26.306,26.333,26.361,26.333,26.194,25.917,25.5,24.889,24.167,23.361,22.556,21.778,21.028,20.333,19.75,19.306,18.972,18.694,18.361,17.75,16.722,15.25,13.361,11.361,10.0,9.417,9.417,10.139,11.389,12.583,13.667,14.306,14.778,14.972,14.972,14.917,14.917,15.083,15.389,15.778,16.139,16.361,16.167,15.5,14.611,13.667,13.222,13.444,14.389,15.472,16.556,17.5,18.306,18.917,19.389,19.75,20.028,20.25,20.472,20.667,20.861,21.056,21.25,21.444,21.611,21.806,22.0,22.222,22.5,22.778,23.056,23.25,23.389,23.444,23.472,23.444,23.361,23.25,23.111,23.0,22.944,22.917,22.889,22.861,22.833,22.833,22.833,22.806,22.75,22.667,22.583,22.528,22.444,22.389,22.333,22.25,22.139,21.833,21.333,20.472,19.278,17.778,16.278,14.778,13.278,11.778,10.278,9.167,8.583,8.583,9.306,10.556,11.806,13.056,14.167,14.861,15.306,15.667,15.917,16.139,16.333,16.5,16.611,16.583,16.5,16.444,16.444,16.556,16.667,16.806,16.944,17.0,17.028,17.056,17.139,17.306,17.528,17.667,17.75,17.722,17.667,17.583,17.444,17.194,16.806,16.278,15.694,15.167,14.944,15.139,15.583,16.083,16.583,17.0,17.306,17.528,17.667,17.639,17.417,16.917,16.306,15.667,15.139,14.806,14.722,14.861,15.167,15.583,16.0,16.361,16.611,16.75,16.861,17.028,17.333,17.806,18.389,18.917,19.361,19.556,19.639,19.639,19.639,19.639,19.611,19.583,19.556,19.5,19.472,19.389,19.306,19.194,19.194,19.306,19.528,19.778,20.0,20.167,20.222,20.194,20.0,19.556,18.806,17.889,16.944,16.0,15.0,13.806,12.333,10.611,8.667,6.667,4.667,2.889,1.583,0.778,0.444,0.083,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.639,2.0,4.056,6.528,9.167,11.861,14.389,16.5,18.139,19.333,20.083,20.528,20.833,21.028,21.25,21.472,21.722,21.917,22.056,22.111,22.028,21.889,21.694,21.528,21.444,21.444,21.528,21.639,21.806,21.972,22.111,22.222,22.278,22.306,22.25,22.167,22.083,21.972,21.889,21.833,21.778,21.75,21.667,21.306,20.472,19.306,18.0,16.75,15.611,14.583,13.611,12.556,11.333,9.833,8.167,6.5,4.917,3.5,2.222,1.139,0.361,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"tsdc":[0.0,0.652,0.986,1.217,1.364,1.554,1.916,2.534,3.43,4.537,5.716,6.82,7.749,8.44,8.856,8.972,8.792,8.368,7.807,7.258,6.867,6.728,6.856,7.201,7.69,8.256,8.849,9.427,9.945,10.357,10.642,10.818,10.922,10.999,11.093,11.262,11.554,11.959,12.379,12.641,12.586,12.157,11.436,10.613,9.899,9.423,9.177,9.038,8.828,8.373,7.547,6.332,4.897,3.594,2.828,2.849,3.642,4.991,6.633,8.374,10.098,11.718,13.16,14.382,15.39,16.223,16.933,17.563,18.122,18.573,18.855,18.929,18.831,18.664,18.538,18.501,18.525,18.535,18.455,18.224,17.809,17.222,16.527,15.827,15.203,14.652,14.071,13.313,12.27,10.942,9.449,7.995,6.812,6.116,6.048,6.62,7.707,9.102,10.608,12.089,13.461,14.674,15.685,16.484,17.096,17.565,17.925,18.187,18.359,18.461,18.529,18.597,18.674,18.745,18.783,18.779,18.743,18.703,18.683,18.67,18.595,18.353,17.881,17.219,16.505,15.895,15.482,15.277,15.243,15.333,15.501,15.703,15.901,16.072,16.211,16.33,16.437,16.544,16.662,16.807,16.993,17.236,17.54,17.893,18.262,18.6,18.846,18.949,18.892,18.694,18.398,18.059,17.738,17.496,17.393,17.456,17.654,17.899,18.098,18.204,18.231,18.227,18.234,18.264,18.315,18.392,18.509,18.666,18.835,18.97,19.016,18.935,18.722,18.406,18.036,17.667,17.349,17.124,17.02,17.042,17.169,17.371,17.617,17.879,18.128,18.34,18.503,18.63,18.745,18.854,18.927,18.92,18.8,18.558,18.192,17.673,16.945,15.965,14.75,13.376,11.938,10.489,9.014,7.474,5.861,4.222,2.668,1.41,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,2.046,3.603,5.211,6.61,7.718,8.537,9.088,9.428,9.67,9.964,10.442,11.176,12.147,13.262,14.389,15.411,16.278,17.007,17.631,18.168,18.622,18.996,19.3,19.514,19.542,19.237,18.495,17.343,15.959,14.601,13.47,12.594,11.812,10.845,9.457,7.615,5.575,3.764,2.534,1.999,2.073,2.597,3.389,4.235,4.894,5.188,5.127,4.906,4.759,4.818,5.088,5.48,5.855,6.075,6.046,5.731,5.156,4.424,3.688,3.089,2.686,2.421,2.193,1.959,1.735,1.499,1.176,0.773,0.0],"tsdcGrade":[-0.0037,-0.0037,-0.0037,-0.0037,-0.0037,-0.0015,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,-0.0001,0.0006,0.0006,0.0006,-0.0003,-0.0014,-0.0014,-0.0014,-0.0031,-0.0039,-0.0039,-0.0039,-0.0043,-0.0052,-0.0052,-0.0052,-0.0053,-0.0054,-0.0054,-0.0053,-0.0052,-0.0052,-0.0053,-0.0053,-0.0053,-0.0053,-0.0053,-0.0049,-0.0048,-0.0042,-0.0026,-0.0026,-0.0006,0.0009,0.0009,0.0015,0.0025,0.0025,0.0025,-0.0011,-0.0022,-0.0022,-0.0022,-0.0022,-0.0022,-0.0022,-0.0112,-0.0148,-0.0148,-0.0167,-0.0307,-0.0307,-0.039,-0.0411,-0.0391,-0.0382,-0.0237,-0.0168,-0.0037,0.0079,0.0136,0.0221,0.0245,0.0273,0.0315,0.0336,0.0392,0.0428,0.0461,0.0491,0.0496,0.0484,0.0476,0.0433,0.0429,0.0378,0.0378,0.0355,0.0347,0.0347,0.0347,0.0347,0.0347,0.0347,0.0347,0.0343,0.0343,0.0343,0.0293,0.029,0.0211,0.0179,0.0073,0.0044,-0.007,-0.0092,-0.0143,-0.0155,-0.0163,-0.012,-0.0084,-0.0016,0.0076,0.0121,0.0214,0.0233,0.0255,0.0238,0.0223,0.0178,0.0142,0.0112,0.0067,0.0056,0.0029,0.0028,0.0045,0.0046,0.0111,0.0115,0.0209,0.0222,0.0312,0.033,0.0387,0.0397,0.0412,0.0399,0.0388,0.0352,0.034,0.0303,0.0299,0.0293,0.0299,0.0303,0.03,0.0284,0.0259,0.0199,0.0172,0.0071,0.0036,-0.0038,-0.0083,-0.0116,-0.0129,-0.0123,-0.0083,-0.0045,-0.0006,0.0042,0.0053,0.0062,0.0054,0.0046,0.0057,0.0076,0.0132,0.0203,0.0247,0.0357,0.0384,0.0431,0.0446,0.0454,0.0441,0.0437,0.0417,0.0415,0.041,0.0419,0.0426,0.0448,0.0451,0.0453,0.0426,0.0407,0.0315,0.0269,0.0189,0.0107,0.0071,0.0002,-0.0012,-0.0037,-0.0049,-0.0062,-0.0074,-0.0101,-0.0101,-0.0122,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0165,-0.0216,-0.0235,-0.0235,-0.0235,-0.0272,-0.0283,-0.0283,-0.0291,-0.0296,-0.0296,-0.0289,-0.0288,-0.0285,-0.0284,-0.0294,-0.0298,-0.0325,-0.0332,-0.035,-0.0345,-0.0341,-0.0299,-0.0268,-0.0229,-0.0161,-0.0142,-0.0065,-0.0065,0.0013,0.0013,0.0052,0.0086,0.0086,0.0093,0.0137,0.0137,0.0137,0.0137,0.0137,0.0137,0.0137,0.0137,0.014,0.0148,0.0148,0.0148,0.0148,0.0148,0.0143,0.0115,0.0115,0.0115,0.0115,0.0115,0.0056,0.0048,0.0048,0.0048,0.0048,0.0048,0.0048,0.0048,0.0048,0.0048,0.0048,0.0048]};
+/* ===== Pack, thermal, abuse kinetics, gas, vehicle, charger, sensors, edge BMS ===== */
+const NS=13, NP=8, NC=NS*NP;
+const FIT={Rohm:0.00387,Re:0.01007,tauE:70.8};           // fitted to PyBaMM DFN pulses (see Model tab)
+CELL.Re=FIT.Re; CELL.tauE=FIT.tauE;
+function mulberry(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gaussR(r){let u=0,v=0;while(!u)u=r();while(!v)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+const K0=273.15;
+const TH={Cc:66,Cs:9,Rcs:2.3,Rin:15,Rx:25,hIn:5,Acell:0.00531,Cair:350,Gah:12,Chous:2200,Aext:0.45,Vfree:0.006,Vjr:2.2e-5,
+  Tvent:130+K0,Tsep:170+K0,ejectFrac:0.5,Frad:0.0013};
+const AB={Asei:1.667e15,Esei:1.3508e5,Hsei:257,Wc:6.104e5,Ane:2.5e13,Ene:1.3508e5,Hne:1714,tref:0.033,
+  Ape:6.667e13,Epe:1.396e5,Hpe:314,Wp:1.221e6,Ae:5.14e25,Ee:2.74e5,He:155,We:4.07e5};
+const LIM={OV:4.25,UV:2.6,OTd:60,OTc:45,UTc:0,OCd:85,OCc:32,Vcv:4.2*NS,gasH2:40,dP:1.5};
+const NTC_POS=[0,2,4,6,8,10,12].map(s=>({s,p:3}));        // cell-surface thermistors
+const PROFILES={wmtc1:'WMTC Part 1 (urban)',wmtc12:'WMTC Part 1 + 2 (urban + rural)',tsdc:'Real-world trip with road grade (NREL TSDC)',charge:'Charging, 10 A CC-CV',fast:'Charging, 20 A CC-CV',park:'Parked'};
+
+function createSim(seed,amb,soc0){
+  const r=mulberry(seed||7), T0=amb+K0;
+  const cells=[];
+  for(let s=0;s<NS;s++)for(let p=0;p<NP;p++){
+    const c=newCell(Math.min(0.99,soc0+0.003*gaussR(r)),{capF:1+0.006*gaussR(r),rF:1+0.04*gaussR(r),Rohm:FIT.Rohm,T:T0});
+    Object.assign(c,{Cc:TH.Cc*(1+0.03*gaussR(r)),s,p,k:s*NP+p,weldR:0.0005,heaterW:0,Iterm:0,Ie:0,Isc:0,qE:0,alive:true,tr:false,dead:false,trT:null,Vg:c.V});
+    cells.push(c);
+  }
+  for(const c of cells){c.nb=[];for(const [s2,p2] of [[c.s-1,c.p],[c.s+1,c.p],[c.s,c.p-1],[c.s,c.p+1]])if(s2>=0&&s2<NS&&p2>=0&&p2<NP)c.nb.push(cells[s2*NP+p2]);}
+  const sensors=makeSensors(r,T0);
+  const sim={t:0,r,amb:T0,cells,linkR:new Array(NS-1).fill(0.0002),linkExtra:new Array(NS-1).fill(0),
+    air:T0,hous:T0,term:T0,gas:{voc:0,h2:0,co2:0,dP:0,burst:false},
+    veh:{v:0,a:0,dist:0,tc:0,Pb:0,vt:0},profile:'wmtc1',
+    I:0,Vstack:NS*cells[0].V,Vplus:NS*cells[0].V,contactor:true,cmdContactor:true,welded:false,chargerFault:false,
+    chg:{done:false},bleed:new Array(NS).fill(0),
+    faults:{},crashT:null,events:[],evCount:0,sensors,bms:null,maxTRcells:0};
+  sim.bms=makeBMS(sim,soc0);
+  return sim;
+}
+function simLog(sim,level,grp,msg){sim.evCount++;sim.events.push({id:sim.evCount,t:sim.t,level,grp,msg});if(sim.events.length>500)sim.events.shift();}
+
+/* ---- electrical network: 13 series groups of 8 parallel cells ---- */
+function cellThevenin(c){
+  if(c.dead)return null;
+  const T=c.Tc;const I0=c.Ie;
+  const r=cellVoltage(c,I0,T);
+  let E=r.V+r.Rs*I0, R=r.Rs;                               // linearised at last current
+  if(isFinite(c.Risc)){const f=c.Risc/(c.Risc+R);E=E*f;R=R*f;}  // internal short in parallel
+  R+=c.weldR;
+  return {E,R,r};
+}
+function solvePack(sim,demand){
+  const G=[];let Ep=0,Rp=0,open=false;
+  for(let s=0;s<NS;s++){
+    let g=0,e=0;const th=[];
+    for(let p=0;p<NP;p++){const c=sim.cells[s*NP+p];const t=cellThevenin(c);th.push(t);if(t){g+=1/t.R;e+=t.E/t.R;}}
+    if(g===0){open=true;G.push(null);continue;}
+    G.push({E:e/g,R:1/g,th});Ep+=e/g;Rp+=1/g;
+  }
+  for(let s=0;s<NS-1;s++)Rp+=sim.linkR[s]+sim.linkExtra[s];
+  Rp+=0.0001+0.0003; // shunt + contactor
+  let I=0;
+  if(open)I=0;
+  else if(demand.mode==='power'){const P=demand.P;const disc=Ep*Ep-4*Rp*P;I=disc>0?(Ep-Math.sqrt(disc))/(2*Rp):Ep/(2*Rp);}
+  else I=demand.I;
+  // distribute
+  let Vstack=0;
+  for(let s=0;s<NS;s++){
+    const g=G[s];
+    if(!g){for(let p=0;p<NP;p++){const c=sim.cells[s*NP+p];c.Iterm=0;c.Isc=0;}continue;}
+    const Vg=g.E-g.R*I;Vstack+=Vg;
+    for(let p=0;p<NP;p++){
+      const c=sim.cells[s*NP+p],t=g.th[p];
+      if(!t){c.Iterm=0;c.Isc=0;c.Vg=Vg;continue;}
+      c.Iterm=(t.E-Vg)/t.R;
+      const Vint=Vg+c.Iterm*c.weldR;              // voltage at cell terminals inside weld
+      c.Isc=isFinite(c.Risc)?Vint/c.Risc:0;
+      c.Ie=c.Iterm+c.Isc+sim.bleed[s]/NP;
+      c.Vg=Vg;
+    }
+  }
+  for(let s=0;s<NS-1;s++)Vstack-=I*(sim.linkR[s]+sim.linkExtra[s]);
+  return {I,Ep,Rp,Vstack,open};
+}
+
+/* ---- abuse kinetics (Kim et al. 2007 four-reaction model) ---- */
+function abuseStep(c,dt){
+  const T=c.Tc, RT=RGAS*T;
+  const rsei=AB.Asei*Math.exp(-AB.Esei/RT)*c.sei;
+  const rne=AB.Ane*Math.exp(-AB.Ene/RT)*c.ne*Math.exp(-c.tsei/AB.tref);
+  const rpe=AB.Ape*Math.exp(-AB.Epe/RT)*c.pe*(1-c.pe);
+  const re=AB.Ae*Math.exp(-AB.Ee/RT)*c.el;
+  const q=(AB.Hsei*AB.Wc*rsei+AB.Hne*AB.Wc*rne+AB.Hpe*AB.Wp*rpe+AB.He*AB.We*re)*TH.Vjr;
+  return {q,rsei,rne,rpe,re};
+}
+function applyAbuse(c,ab,dt){
+  c.sei=Math.max(0,c.sei-ab.rsei*dt);c.ne=Math.max(0,c.ne-ab.rne*dt);c.tsei+=ab.rne*dt;
+  c.pe=Math.min(1,c.pe+ab.rpe*dt);c.el=Math.max(0,c.el-ab.re*dt);
+}
+
+/* ---- one simulation step ---- */
+function stepSim(sim,dt){
+  const S=sim.sensors, B=sim.bms;
+  sim.contactor=sim.cmdContactor||sim.welded;
+  // 1) load demand
+  let demand={mode:'power',P:4.5};  // edge node + AFE quiescent load, always on the stack
+  const prof=sim.profile, v=sim.veh;
+  const driving=prof==='wmtc1'||prof==='wmtc12'||prof==='tsdc';
+  const charging=prof==='charge'||prof==='fast';
+  if(driving){
+    const cyc=prof==='tsdc'?CYC.tsdc:(prof==='wmtc12'?CYC.w12:CYC.wmtc1);
+    const n=cyc.length, i=Math.floor(v.tc)%n, j=(i+1)%n;
+    v.vt=cyc[j]; const grade=prof==='tsdc'?CYC.tsdcGrade[i]:0;
+    let a=clampN((v.vt-v.v)/1,-3,3.5);
+    const Plim=sim.cmdContactor?Math.min(VEH.Pmax,B.pLimit):0;   // BMS also disables the drive over CAN
+    let P=battPower(v.v,a,grade);
+    if(!sim.cmdContactor){a=-(wheelForce(v.v,0,grade))/((VEH.m+VEH.rider)*(1+VEH.rotI));P=0;}
+    else if(P>Plim){const Froad=wheelForce(v.v,0,grade);const Fmax=(Plim-VEH.Paux)*0.84/Math.max(v.v,1.0);a=Math.min(a,(Fmax-Froad)/((VEH.m+VEH.rider)*(1+VEH.rotI)));P=battPower(v.v,a,grade);}
+    const Pregen=-B.iChargeAllow*Math.max(40,sim.Vstack);if(P<Pregen)P=Pregen; // BMS regen limit; friction brakes take the rest
+    v.a=a;v.Pb=P;demand.P+=P;
+    v.v=clampN(v.v+a*dt,0,VEH.vmax);v.dist+=v.v*dt;v.tc+=dt;
+  } else {v.v=Math.max(0,v.v-2*dt);v.a=0;v.Pb=0;}
+  let chargeI=0;
+  if(charging&&sim.cmdContactor&&!sim.chg.done){
+    const Iset=prof==='fast'?20:10;
+    const th=solvePack(sim,{mode:'current',I:0});
+    const Icv=Math.max(0,(LIM.Vcv-th.Ep)/th.Rp);
+    chargeI=sim.chargerFault?Iset:Math.min(Iset,B.iChargeAllow,Icv);
+    if(!sim.chargerFault&&chargeI<2&&th.Ep>LIM.Vcv-0.3){sim.chg.done=true;simLog(sim,'info',null,'Charge complete: CV current fell below C/20');}
+  }
+  // 2) electrical solve (two passes to refine linearisation)
+  let sol;
+  for(let it=0;it<2;it++){
+    if(charging)sol=solvePack(sim,{mode:'current',I:-chargeI+demand.P/Math.max(30,sim.Vstack)});
+    else sol=solvePack(sim,demand);
+  }
+  sim.I=sol.I;sim.Vstack=sol.Vstack;
+  sim.Vplus=(sim.contactor||sim.welded)?sol.Vstack-sim.I*0.0004:Math.max(0,sim.Vplus*Math.exp(-dt/2));
+  // 3) electrochemistry + electrical heat
+  for(const c of sim.cells){
+    c.qWeld=0;
+    if(c.dead){c.qE=isFinite(c.Risc)?shortDeadCell(c,dt):0;continue;}
+    const r=cellVoltage(c,c.Ie,c.Tc);
+    c.V=r.V;
+    const ent=cellEntropic(c);
+    c.qE=c.Ie*(r.U-r.V)-c.Ie*c.Tc*ent+c.Isc*Math.max(0,r.V);
+    c.qWeld=c.Iterm*c.Iterm*c.weldR;
+    advanceCell(c,c.Ie,c.Tc,dt);
+  }
+  // 4) thermal network with adaptive sub-stepping for abuse reactions
+  thermalStep(sim,dt);
+  // 5) gas and enclosure pressure
+  gasStep(sim,dt);
+  if(sim.crashT!=null&&!sim.crashDone&&sim.t-sim.crashT>45){sim.crashDone=true;const c=sim.cells[sim.crashCell];if(!c.dead){c.Risc=1.5;simLog(sim,'phys',c.s,`Deformed cell ${cellName(c)} developed a soft internal short (1.5 Ω)`);}}
+  // 6) sensors and edge BMS (1 Hz)
+  sim.t+=dt;
+  sampleSensors(sim,dt);
+  bmsStep(sim,dt);
+}
+// a vented (CID-open) cell whose separator has collapsed dumps its remaining charge through the internal short
+function shortDeadCell(c,dt){
+  const soc=cellSOC(c);if(soc<=0.001)return 0;
+  const U=cellOCVbulk(c),Rint=0.02;const Isc=Math.max(0,U)/(c.Risc+Rint);
+  const dQ=Math.min(Isc*dt,soc*CELL.Qnom*c.capF*3600);
+  const dx=dQ/(CELL.Qnom*c.capF*3600)*(CELL.x100-CELL.x0),dy=dQ/(CELL.Qnom*c.capF*3600)*(CELL.y100-CELL.y0);
+  for(let i=0;i<c.cn.length;i++)c.cn[i]=Math.max(1,c.cn[i]-dx*CELL.cnMax);
+  for(let i=0;i<c.cp.length;i++)c.cp[i]=Math.min(CELL.cpMax-1,c.cp[i]-dy*CELL.cpMax);
+  c.Isc=dQ/dt;return U*dQ/dt;
+}
+function clampN(x,a,b){return Math.min(b,Math.max(a,x));}
+
+function thermalStep(sim,dt){
+  const cells=sim.cells;let t=0,guard=0;
+  const hExt=7+3.9*Math.pow(sim.veh.v,0.8);
+  const Gcell=TH.hIn*TH.Acell;
+  while(t<dt-1e-9&&guard<400){
+    guard++;
+    // abuse heat rates and adaptive step
+    let maxRate=0;const ab=new Array(NC);
+    for(const c of cells){
+      if(c.Tc>60+K0&&!c.consumed){ab[c.k]=abuseStep(c,0);maxRate=Math.max(maxRate,ab[c.k].q/c.Cc);}
+    }
+    let h=dt-t;
+    if(maxRate>0)h=Math.min(h,Math.max(0.005,2/maxRate));
+    // explicit update (small conductances, stable for h<=1 s)
+    const dTc=new Float64Array(NC),dTs=new Float64Array(NC);let qAir=0;
+    for(const c of cells){
+      const k=c.k;let qa=0;
+      if(ab[k]){qa=ab[k].q;applyAbuse(c,ab[k],h);if(c.sei<1e-4&&c.ne<1e-4&&c.pe>0.9999&&c.el<1e-4)c.consumed=true;}
+      c.qAbuse=qa;
+      let qCore=c.qE+c.heaterW*0+qa;
+      if(c.tr){qAir+=qa*TH.ejectFrac;qCore-=qa*TH.ejectFrac;}
+      const qcs=(c.Tc-c.Ts)/TH.Rcs;
+      dTc[k]=(qCore-qcs)/c.Cc;
+      let qs=qcs+c.qWeld+c.heaterW-Gcell*(c.Ts-sim.air);
+      // neighbours on the 13x8 grid
+      for(const o of c.nb){qs+=(o.Ts-c.Ts)/(o.s===c.s?TH.Rin:TH.Rx);if(o.Ts>400||c.Ts>400)qs+=5.670e-8*0.8*TH.Frad*(o.Ts**4-c.Ts**4);} // conduction + radiation
+      dTs[k]=qs/TH.Cs;
+      qAir+=Gcell*(c.Ts-sim.air);
+    }
+    for(const c of cells){c.Tc=Math.min(1100+K0,c.Tc+dTc[c.k]*h);c.Ts=Math.min(1000+K0,c.Ts+dTs[c.k]*h);}
+    // link heating (loose busbar) to surfaces of adjacent groups
+    for(let s=0;s<NS-1;s++){if(sim.linkExtra[s]>0){const q=sim.I*sim.I*sim.linkExtra[s];for(let p=0;p<NP;p++){cells[s*NP+p].Ts+=q/(2*NP)*h/TH.Cs;cells[(s+1)*NP+p].Ts+=q/(2*NP)*h/TH.Cs;}}}
+    const qTerm=sim.I*sim.I*0.0006;
+    sim.term+=h*(qTerm-0.8*(sim.term-sim.air))/60;
+    const dAir=(qAir-TH.Gah*(sim.air-sim.hous))/TH.Cair;
+    const dH=(TH.Gah*(sim.air-sim.hous)-hExt*TH.Aext*(sim.hous-sim.amb))/TH.Chous;
+    sim.air+=dAir*h;sim.hous+=dH*h;
+    // events: vent, separator collapse, thermal runaway
+    for(const c of cells){
+      if(!c.vented&&c.Tc>=TH.Tvent){c.vented=true;c.gasVent=0.012;simLog(sim,'phys',c.s,`Cell ${cellName(c)} safety vent opened at ${(c.Tc-K0).toFixed(0)} °C; CID disconnects it`);c.dead=true;}
+      if(!c.sepGone&&c.Tc>=TH.Tsep){c.sepGone=true;c.Risc=0.01;}
+      if(!c.tr&&c.vented&&(dTc[c.k]>1||c.Tc>200+K0)){c.tr=true;c.trT=sim.t;sim.maxTRcells++;simLog(sim,'phys',c.s,`Cell ${cellName(c)} in thermal runaway`);}
+    }
+    t+=h;
+  }
+}
+function cellName(c){return `${c.s+1}.${c.p+1}`;}
+
+function gasStep(sim,dt){
+  const g=sim.gas;const Vf=TH.Vfree;
+  for(const c of sim.cells){
+    // SEI/electrolyte decomposition off-gassing before venting (retained in cell until vent, small leakage through crimp)
+    const gen=(c.qAbuse||0)*2e-5*dt;           // mol per J of decomposition heat (order-of-magnitude assumption)
+    if(c.vented){g.voc+=gen*0.6;g.co2+=gen*0.3;g.h2+=gen*0.1*(c.tr?3:1);
+      if(c.gasVent>0){const rel=Math.min(c.gasVent,0.004*dt);c.gasVent-=rel;g.voc+=rel;}}
+    else{g.voc+=gen*0.02;}
+    if(c.tr&&!c.trGas){c.trGas=true;c.trGasLeft=0.22;}
+    if(c.trGasLeft>0){const rel=Math.min(c.trGasLeft,0.02*dt);c.trGasLeft-=rel;g.h2+=rel*0.28;g.co2+=rel*0.4;g.voc+=rel*0.32;}
+  }
+  const nAirMol=101325*Vf/(RGAS*sim.air);
+  const nx=g.voc+g.h2+g.co2;
+  g.dP=nx*RGAS*sim.air/Vf/1000+ (sim.air-sim.amb)/sim.amb*101.325*0.15; // kPa gauge (breather limits thermal part)
+  const tau=g.burst?1:600;                    // breather membrane leak; burst disc at 8 kPa
+  if(g.dP>8&&!g.burst){g.burst=true;simLog(sim,'phys',null,'Enclosure burst disc opened at 8 kPa');}
+  const f=Math.exp(-dt/tau);g.voc*=f;g.h2*=f;g.co2*=f;
+  g.vocPpm=g.voc/nAirMol*1e6;g.h2Ppm=g.h2/nAirMol*1e6;
+}
+
+/* ---- sensors ---- */
+function makeSensors(r,T0){
+  const S={
+    cellV:Array.from({length:NS},(_,s)=>({off:0.0015*gaussR(r),gain:1+0.0003*gaussR(r),fault:'ok',val:0,raw:0})),
+    stack:{gain:1+0.001*gaussR(r),val:0,raw:0,fault:'ok'},
+    plus:{val:0,raw:0,fault:'ok'},
+    shunt:{off:0.02*gaussR(r),gain:1+0.003*gaussR(r),fault:'ok',val:0,raw:0,drift:0},
+    hall:{off:0.25*gaussR(r),gain:1+0.01*gaussR(r),fault:'ok',val:0,raw:0},
+    ntc:[...NTC_POS.map((p,i)=>({id:'T'+(i+1),where:`cell ${p.s+1}.${p.p+1} surface`,cell:p.s*NP+p.p,grp:p.s})),
+         {id:'T8',where:'main terminal / contactor',node:'term'},{id:'T9',where:'ambient, edge node board',node:'amb'}]
+         .map(n=>Object.assign(n,{Tf:T0,fault:'ok',counts:0,val:T0-K0})),
+    env:{T:T0-K0,RH:60,P:101.3,gasR:120,gasKohm:120,Rf:120,fault:'ok'},
+    h2:{ppm:0,f:0,fault:'ok'},
+    imu:{ax:0,az:1,peak:0,fault:'ok'},
+    aux:{closed:true},
+    can:{speed:0,online:true},
+  };
+  return S;
+}
+function ntcCounts(Tk){const R=10000*Math.exp(3435*(1/Tk-1/298.15));return Math.round(3.3*R/(R+10000)/3.3*4095);}
+function countsToC(n){if(n<=0)return 150;if(n>=4095)return -40;const R=10000*n/(4095-n);const T=1/(1/298.15+Math.log(R/10000)/3435)-K0;return clampN(T,-40,150);}
+function sampleSensors(sim,dt){
+  const S=sim.sensors,r=sim.r;
+  for(let s=0;s<NS;s++){
+    const cs=S.cellV[s];let Vtrue=sim.cells[s*NP].Vg;
+    if(s>0)Vtrue-=sim.I*sim.linkExtra[s-1];     // sense tap sits after the link
+    let v=(Vtrue*cs.gain+cs.off)+0.0008*gaussR(r);
+    if(cs.fault==='open')v=0.03*Math.abs(gaussR(r));
+    if(cs.fault==='stuck'){if(cs.stuckV==null)cs.stuckV=cs.val;v=cs.stuckV;}
+    cs.raw=Math.round(v*1000);cs.val=cs.raw/1000;
+  }
+  S.stack.raw=Math.round(sim.Vstack*S.stack.gain*100);S.stack.val=S.stack.raw/100;
+  S.plus.raw=Math.round(sim.Vplus*100);S.plus.val=S.plus.raw/100;
+  const shTemp=(sim.term-K0-25)*0.001;
+  let ish=sim.I*S.shunt.gain+S.shunt.off+S.shunt.drift+shTemp+0.01*gaussR(r);
+  S.shunt.raw=Math.round(ish*100);  // µV across the 100 µΩ shunt
+  S.shunt.val=Math.round(ish*1000)/1000;
+  let ih=sim.I*S.hall.gain+S.hall.off+0.12*gaussR(r);
+  if(S.hall.fault==='dead')ih=-0.0;
+  S.hall.raw=Math.round((2.5+ih*0.01)*1000);S.hall.val=Math.round(ih*100)/100;
+  for(const n of S.ntc){
+    let Ttrue;
+    if(n.cell!=null)Ttrue=n.fault==='detached'?sim.air:sim.cells[n.cell].Ts;
+    else if(n.node==='term')Ttrue=sim.term; else Ttrue=sim.amb+3;
+    n.Tf+= (Ttrue-n.Tf)*(1-Math.exp(-dt/8));
+    let cnt=ntcCounts(n.Tf)+Math.round(gaussR(r)*1.5);
+    if(n.fault==='open')cnt=4095; if(n.fault==='short')cnt=0;
+    n.counts=clampN(cnt,0,4095);n.val=countsToC(n.counts);
+  }
+  const e=S.env,g=sim.gas;
+  e.T=sim.air-K0+0.3*gaussR(r)*0.3;
+  const AH=0.7*satVap(sim.amb);e.RH=clampN(100*AH/satVap(sim.air),0,100);
+  e.P=101.325+g.dP+0.02*gaussR(r);
+  const R0=120*(1-0.004*(e.RH-50));
+  const target=R0/(1+Math.pow(Math.max(0,g.vocPpm||0)/5,0.7));
+  e.Rf+= (target-e.Rf)*(1-Math.exp(-dt/8));e.gasKohm=e.Rf*(1+0.01*gaussR(r));
+  const h2t=Math.min(2000,g.h2Ppm||0);S.h2.f+=(h2t-S.h2.f)*(1-Math.exp(-dt/13));S.h2.ppm=S.h2.fault==='unplugged'?0:Math.max(0,S.h2.f+0.8*gaussR(r));
+  const vib=0.03+0.012*sim.veh.v;
+  S.imu.ax=sim.veh.a/9.81+vib*gaussR(r);S.imu.az=1+vib*gaussR(r);
+  S.imu.peak=Math.max(Math.abs(S.imu.ax),Math.abs(S.imu.az-1)+1);
+  if(sim.crashT!=null&&sim.t-sim.crashT<1.01){S.imu.peak=26.4;S.imu.ax=-26.4;}
+  S.aux.closed=sim.contactor||sim.welded;
+  S.can.speed=sim.veh.v;S.can.idc=(sim.veh.Pb/Math.max(40,sim.Vstack))+(sim.profile==='charge'||sim.profile==='fast'?sim.I-(4.5/Math.max(40,sim.Vstack))-sim.veh.Pb/Math.max(40,sim.Vstack):0)+0.2*gaussR(sim.r);
+}
+function satVap(Tk){const T=Tk-K0;return 6.112*Math.exp(17.62*T/(243.12+T))*216.7/Tk;} // g/m3
+
+/* ---- edge BMS (runs on the Raspberry Pi) ---- */
+function makeBMS(sim,soc0){
+  // ECM identified from the cell model at 25 C: OCV table + R0 + one RC (what a lab HPPC test would give)
+  const tab=[];for(let i=0;i<=50;i++){const s=i/50;tab.push(Up(CELL.y0+s*(CELL.y100-CELL.y0))-Un(CELL.x0+s*(CELL.x100-CELL.x0)));}
+  const probe=newCell(0.5,{Rohm:FIT.Rohm});const r=cellVoltage(probe,1,TREF);
+  const R0=(r.Rs-CELL.Re*(1-Math.exp(-1/CELL.tauE)))/NP;
+  return {tab,R0,R1:CELL.Re/NP,tau:CELL.tauE,Cah:CELL.Qnom*NP*0.995,
+    x:[0.70,0],P:[0.03,0,0,1e-4],cc:0.70,ccInit:0.70,
+    latched:new Map(),pLimit:VEH.Pmax,iChargeAllow:20,anomaly:new Array(NS).fill(0),alert:new Array(NS).fill(false),alertKind:new Array(NS).fill(''),
+    over:new Array(NS).fill(0),calm:new Array(NS).fill(0),sensorFault:new Map(),thermalLevel:0,rateT:new Array(9).fill(0),prevT:null,
+    telem:[],telCount:0,hist:{soc:[],est:[],cc:[],I:[],v:[],vt:[],tmax:[],anom:[],gas:[],h2:[]},acc:{h:0,tl:0},balancing:0};
+}
+function ocvOf(B,s){s=clampN(s,0,1);const x=s*50,i=Math.min(49,Math.floor(x));return B.tab[i]+(B.tab[i+1]-B.tab[i])*(x-i);}
+function docvOf(B,s){s=clampN(s,0,0.999);const i=Math.floor(s*50);return (B.tab[i+1]-B.tab[i])*50;}
+function bmsFault(sim,key,msg,grp){const B=sim.bms;if(B.okCount)B.okCount[key]=0;if(!B.sensorFault.has(key)){B.sensorFault.set(key,msg);simLog(sim,'sensor',grp==null?null:grp,msg);}}
+function bmsClear(sim,key){const B=sim.bms;if(B.sensorFault.has(key)){B.okCount=B.okCount||{};B.okCount[key]=(B.okCount[key]||0)+1;if(B.okCount[key]>=10){B.okCount[key]=0;B.sensorFault.delete(key);simLog(sim,'info',null,'Sensor check passed again: '+key);}}}
+function bmsTrip(sim,reason,grp,detail){
+  const B=sim.bms;
+  if(!B.latched.has(reason)){B.latched.set(reason,{grp,detail});simLog(sim,'trip',grp,reason+': '+detail);}
+  if(sim.cmdContactor){sim.cmdContactor=false;simLog(sim,'trip',null,'Contactor commanded open');}
+  sim.contactor=sim.cmdContactor||sim.welded;
+}
+function bmsStep(sim,dt){
+  const B=sim.bms,S=sim.sensors,cells=sim.cells;
+  const I=S.shunt.val;
+  // --- sensor plausibility ---
+  const vOK=S.cellV.map((c,s)=>{const ok=c.val>0.5&&c.val<4.8;if(!ok)bmsFault(sim,'Cell voltage channel '+(s+1),`Voltage sense channel ${s+1} implausible (${c.val.toFixed(3)} V); excluded`,s);else bmsClear(sim,'Cell voltage channel '+(s+1));return ok;});
+  const sumV=S.cellV.reduce((a,c)=>a+c.val,0);
+  if(vOK.every(x=>x)&&Math.abs(sumV-S.stack.val)>0.6)bmsFault(sim,'Stack sum',`Sum of cells ${sumV.toFixed(2)} V disagrees with stack ${S.stack.val.toFixed(2)} V`);
+  if(Math.abs(S.shunt.val-S.hall.val)>3){B.curMis=(B.curMis||0)+dt;if(B.curMis>5)bmsFault(sim,'Current sensors',`Shunt ${S.shunt.val.toFixed(1)} A and Hall ${S.hall.val.toFixed(1)} A disagree`);}else{B.curMis=0;}
+  // cross-check shunt against the motor controller's reported DC-bus current (CAN) plus known edge-node load
+  const expI=(S.can.idc||0)+4.5/Math.max(40,S.stack.val);
+  B.offEst=(B.offEst||0)+(S.shunt.val-expI-(B.offEst||0))*(1-Math.exp(-dt/30));
+  if(Math.abs(B.offEst)>0.8)bmsFault(sim,'Shunt offset',`Shunt reads ${B.offEst.toFixed(2)} A more than the motor controller and charger report; offset drift suspected`);else if(Math.abs(B.offEst)<0.4)bmsClear(sim,'Shunt offset');
+  const tOK=S.ntc.map((n,i)=>{const ok=n.val>-30&&n.val<140;if(!ok)bmsFault(sim,n.id,`${n.id} (${n.where}) out of range: ${n.val.toFixed(0)} °C, treated as open/short`,n.grp);else bmsClear(sim,n.id);return ok;});
+  if(!sim.cmdContactor&&S.aux.closed)bmsFault(sim,'Contactor','Contactor welded: PACK+ still at stack voltage after open command');
+  // --- protection (validated signals only) ---
+  const vv=S.cellV.map((c,s)=>vOK[s]?c.val:null);
+  vv.forEach((v,s)=>{if(v==null)return;if(v>LIM.OV)bmsTrip(sim,'Over-voltage',s,v.toFixed(3)+' V');if(v<LIM.UV&&I>1)bmsTrip(sim,'Under-voltage',s,v.toFixed(3)+' V under load');});
+  const charging=I<-0.5;
+  S.ntc.slice(0,7).forEach((n,i)=>{if(!tOK[i])return;if(n.val>LIM.OTd)bmsTrip(sim,'Over-temperature',n.grp,`${n.id} ${n.val.toFixed(1)} °C`);if(charging&&n.val>LIM.OTc)bmsTrip(sim,'Charge over-temperature',n.grp,`${n.id} ${n.val.toFixed(1)} °C`);});
+  if(I>LIM.OCd)bmsTrip(sim,'Over-current',null,I.toFixed(1)+' A');
+  if(-I>LIM.OCc)bmsTrip(sim,'Charge over-current',null,(-I).toFixed(1)+' A');
+  // --- thermal event detection (gas, pressure, temperature rate) ---
+  const tv=S.ntc.slice(0,7).map((n,i)=>tOK[i]?n.val:null);
+  B.tBuf=B.tBuf||[];B.tBuf.push(tv);if(B.tBuf.length>11)B.tBuf.shift();
+  const old=B.tBuf[0],span=(B.tBuf.length-1)*dt;
+  if(B.tBuf.length>=11)tv.forEach((t,i)=>{B.rateT[i]=(t!=null&&old[i]!=null)?(t-old[i])/span:0;});
+  const maxRate=Math.max(...B.rateT.slice(0,7));
+  let lvl=0;
+  const tmaxv=Math.max(...tv.filter(x=>x!=null));
+  if(maxRate>0.05||tmaxv>55)lvl=1;
+  if(S.env.gasKohm<60||S.h2.ppm>10||(maxRate>0.3&&tmaxv>60))lvl=Math.max(lvl,2);
+  if(S.h2.ppm>LIM.gasH2||(S.env.P-101.325)>LIM.dP||(maxRate>1&&tmaxv>90))lvl=3;
+  if(lvl>0){B.lvlHold=60;}else if(B.lvlHold>0){B.lvlHold-=dt;lvl=B.thermalLevel;}
+  if(lvl>B.thermalLevel){const msg=['','Level 1: abnormal heating','Level 2: electrolyte off-gas detected in enclosure','Level 3: cell venting or thermal runaway, evacuate'][lvl];simLog(sim,lvl===3?'trip':'anomaly',null,msg);if(lvl>=2)bmsTrip(sim,'Thermal event',null,msg);}
+  B.thermalLevel=lvl;
+  // --- power limits ---
+  const tmax=Math.max(...tv.filter(x=>x!=null));
+  B.pLimit=VEH.Pmax*clampN((60-tmax)/10,0,1)*clampN(B.x[0]/0.1,0.2,1);
+  B.iChargeAllow=tmax>LIM.OTc?0:(tmax<10?4:25);
+  // --- SOC: EKF on pack-average group ECM; coulomb counting for comparison ---
+  const use=vv.map((v,s)=>v!=null&&!B.alert[s]?v:null).filter(v=>v!=null);
+  const a=Math.exp(-dt/B.tau);
+  B.x[0]-=I*dt/3600/B.Cah;B.x[1]=B.x[1]*a+I*B.R1*(1-a);
+  let [p00,p01,p10,p11]=B.P;p00+=1e-9*dt;p01*=a;p10*=a;p11=p11*a*a+1e-7*dt;
+  if(use.length){
+    const z=use.reduce((x,y)=>x+y,0)/use.length,h=ocvOf(B,B.x[0])-I*B.R0-B.x[1],H0=docvOf(B,B.x[0]),H1=-1,Rn=4e-5;
+    const Sv=H0*H0*p00+H0*H1*(p01+p10)+H1*H1*p11+Rn,K0g=(p00*H0+p01*H1)/Sv,K1g=(p10*H0+p11*H1)/Sv,y=z-h;
+    B.x[0]=clampN(B.x[0]+K0g*y,0,1);B.x[1]+=K1g*y;
+    const n00=p00-K0g*(H0*p00+H1*p10),n01=p01-K0g*(H0*p01+H1*p11),n10=p10-K1g*(H0*p00+H1*p10),n11=p11-K1g*(H0*p01+H1*p11);p00=n00;p01=n01;p10=n10;p11=n11;
+  }
+  B.P=[p00,p01,p10,p11];
+  B.cc=clampN(B.cc-I*dt/3600/B.Cah,0,1.05);
+  // --- passive balancing at rest or end of charge ---
+  const vmin=Math.min(...(use.length?use:[0]));  // 'use' already excludes groups flagged by the anomaly detector
+  B.balancing=0;
+  for(let s=0;s<NS;s++){const on=Math.abs(I)<2&&vv[s]!=null&&!B.alert[s]&&vv[s]>3.6&&vv[s]-vmin>0.008;sim.bleed[s]=on?0.06:0;if(on)B.balancing++;}
+  // --- anomaly detector (residual stand-in for the trained model) ---
+  const medV=median(use),medT=median(tv.filter(x=>x!=null)),load=Math.max(1,Math.abs(I));
+  // slow self-discharge trend: deviation from pack median sampled at low current, slope over ~5 min
+  B.devT=(B.devT||0)+dt;
+  if(Math.abs(I)<3&&B.devT>=10){B.devT=0;B.devHist=B.devHist||[];B.devHist.push({t:sim.t,d:vv.map(v=>v==null?null:v-medV)});while(B.devHist.length&&sim.t-B.devHist[0].t>360)B.devHist.shift();}
+  const slope=new Array(NS).fill(0);
+  if(B.devHist&&B.devHist.length>=8){const H=B.devHist;for(let s=0;s<NS;s++){let n=0,sx=0,sy=0,sxx=0,sxy=0;for(const h of H){if(h.d[s]==null)continue;const x=(h.t-H[0].t)/60;n++;sx+=x;sy+=h.d[s];sxx+=x*x;sxy+=x*h.d[s];}if(n>=6){slope[s]=(n*sxy-sx*sy)/(n*sxx-sx*sx);}}}
+  B.slope=slope;
+  for(let s=0;s<NS;s++){
+    let sc,kind;
+    if(vv[s]==null){sc=1;kind='Sensor fault';}
+    else{
+      const ni=Math.round(s/2),tt=tv[ni];
+      const zv=(vv[s]-medV)/(0.006+0.0003*load),zt=tt!=null?(tt-medT)/2.5:0,zr=(B.rateT[ni]||0)/0.05,zd=Math.min(0,slope[s])/0.00025;
+      sc=1-Math.exp(-(zv*zv+zt*zt+zr*zr+zd*zd)/24);
+      const m=Math.max(Math.abs(zv),Math.abs(zt),Math.abs(zr),Math.abs(zd));kind=m===Math.abs(zd)?'Self-discharge faster than the pack (possible internal short)':m===Math.abs(zv)?(zv<0?'Voltage low against the pack':'Voltage high against the pack'):'Abnormal heating near this group';
+    }
+    B.anomaly[s]=0.6*B.anomaly[s]+0.4*sc;
+    if(B.anomaly[s]>0.6){B.over[s]++;B.calm[s]=0;}else{B.over[s]=0;if(B.anomaly[s]<0.4)B.calm[s]++;}
+    if(!B.alert[s]&&B.over[s]>=4){B.alert[s]=true;B.alertKind[s]=kind;simLog(sim,'anomaly',s,`${kind} (score ${B.anomaly[s].toFixed(2)})`);}
+    if(B.alert[s]&&B.calm[s]>=60){B.alert[s]=false;simLog(sim,'info',s,'Anomaly cleared');}
+  }
+  if(S.imu.peak>8&&!B.crashSeen){B.crashSeen=true;simLog(sim,'anomaly',null,`Shock of ${S.imu.peak.toFixed(1)} g recorded by IMU; inspect pack`);}
+  // --- history and telemetry ---
+  B.acc.h+=dt;B.acc.tl+=dt;
+  const socT=cells.filter(c=>!c.dead).reduce((a,c)=>a+cellSOC(c),0)/Math.max(1,cells.filter(c=>!c.dead).length);
+  if(B.acc.h>=2){B.acc.h=0;const H=B.hist,push=(k,v)=>{H[k].push(v);if(H[k].length>900)H[k].shift();};
+    push('soc',socT*100);push('est',B.x[0]*100);push('cc',B.cc*100);push('I',I);push('v',sim.veh.v*3.6);push('vt',sim.veh.vt*3.6);
+    push('tmax',Math.max(...cells.map(c=>c.Tc))-K0);push('anom',Math.max(...B.anomaly));push('gas',S.env.gasKohm);push('h2',S.h2.ppm);}
+  if(B.acc.tl>=5){B.acc.tl=0;B.telCount++;B.telem.push({ts:sim.t,pack_v:S.stack.val,current_a:I,soc_est:B.x[0],t_max:tmax,h2_ppm:S.h2.ppm,anomaly_max:Math.max(...B.anomaly)});if(B.telem.length>300)B.telem.shift();}
+  B.socTrue=socT;
+}
+function injectFault(sim,kind,k,ntcIdx){
+  const c=sim.cells[k],s=c.s,name=cellName(c);let msg='';
+  switch(kind){
+    case 'isc_soft':c.Risc=5;msg=`Soft internal short (5 Ω) in cell ${name}`;break;
+    case 'isc_hard':c.Risc=0.05;msg=`Hard internal short (50 mΩ) in cell ${name}`;break;
+    case 'heater':c.heaterW=25;msg=`25 W external hot spot on cell ${name}`;break;
+    case 'busbar':{const l=Math.min(s,NS-2);sim.linkExtra[l]=0.003;msg=`Loose busbar between groups ${l+1} and ${l+2} (+3 mΩ)`;break;}
+    case 'weld':c.weldR=0.02;msg=`Cracked tab weld on cell ${name} (20 mΩ)`;break;
+    case 'crash':sim.crashT=sim.t;sim.crashCell=k;msg=`Crash: 26 g side impact near cell ${name}`;break;
+    case 'contactor':sim.welded=true;msg='Main contactor tips welded';break;
+    case 'charger':sim.chargerFault=true;msg='Charger lost CV regulation (keeps pushing current)';break;
+    case 'ntc_open':case 'ntc_short':case 'ntc_detached':{const n=sim.sensors.ntc[ntcIdx];n.fault=kind.slice(4);msg=`${n.id} ${kind.slice(4)}`;break;}
+    case 'vsense':sim.sensors.cellV[s].fault='open';msg=`Voltage sense wire of group ${s+1} open`;break;
+    case 'shunt':sim.sensors.shunt.drift=1.5;msg='Shunt amplifier offset drifted by +1.5 A';break;
+    case 'hall':sim.sensors.hall.fault='dead';msg='Hall current sensor failed (reads 0 A)';break;
+    case 'h2':sim.sensors.h2.fault='unplugged';msg='H₂ sensor unplugged';break;
+  }
+  simLog(sim,'inject',kind.startsWith('ntc')||['vsense','shunt','hall','h2','contactor','charger','busbar','crash'].includes(kind)?(kind==='vsense'?s:null):s,'Injected: '+msg);
+}
+function repairAll(sim){
+  for(const c of sim.cells){if(!c.dead){c.Risc=Infinity;}c.heaterW=0;c.weldR=0.0005;}
+  sim.linkExtra.fill(0);sim.welded=false;sim.chargerFault=false;
+  const S=sim.sensors;S.ntc.forEach(n=>n.fault='ok');S.cellV.forEach(c=>{c.fault='ok';c.stuckV=null;});S.shunt.drift=0;S.hall.fault='ok';S.h2.fault='ok';
+  simLog(sim,'inject',null,'All reversible faults repaired (damaged or vented cells stay damaged)');
+}
+function resetProtection(sim){
+  const B=sim.bms,S=sim.sensors;
+  const hot=S.ntc.slice(0,7).find(n=>n.val>50&&n.val<140);
+  if(hot)return {ok:false,msg:`Contactor stays open: ${hot.id} reads ${hot.val.toFixed(1)} °C, must cool below 50 °C.`};
+  if(B.thermalLevel>=2)return {ok:false,msg:'Contactor stays open: off-gas is still present in the enclosure.'};
+  if(sim.cells.some(c=>c.vented))return {ok:false,msg:'Contactor stays open: a vented cell is in the pack. Replace the module first.'};
+  const low=S.cellV.findIndex(c=>c.val>0.5&&c.val<2.9);
+  if(low>=0&&sim.profile!=='charge'&&sim.profile!=='fast')return {ok:false,msg:`Contactor stays open: group ${low+1} is below 2.9 V. Switch to charging first.`};
+  B.latched.clear();sim.cmdContactor=true;sim.chg.done=false;
+  simLog(sim,'ble',null,'Technician reset protection; contactor closed');
+  return {ok:true,msg:'Protection reset. Contactor closed.'};
+}
+function median(a){const b=a.slice().sort((x,y)=>x-y),n=b.length;if(!n)return 0;return n%2?b[(n-1)/2]:(b[n/2-1]+b[n/2])/2;}
+
+const VAL={"model":[4.0933,4.0932,4.0931,4.0931,4.093,4.0555,4.0126,4.0254,4.0881,4.0474,4.0461,4.0336,4.0865,4.1245,4.0868,4.0246,3.9751,4.0225,3.9866,4.0369,4.0183,4.0065,4.0694,4.1009,3.9765,4.0273,4.1267,3.9826,4.0505,4.136,4.0783,4.0785,4.0793,4.08,4.0807,4.0813,4.0818,3.9435,3.8948,3.9284,3.8998,3.8925,3.8947,4.0233,4.0205,3.8575,3.9372,4.0429,4.0638,4.083,4.0681,4.0603,4.0595,4.0613,3.9669,3.9675,4.0198,4.016,3.9755,3.9942,4.0754,4.0416,4.0026,4.1029,4.0083,3.9862,4.034,4.0164,4.0101,4.0073,4.0147,4.0143,4.0685,3.9915,4.0412,4.0368,3.9994,4.0244,4.0325,4.1058,4.0655,4.0657,4.0303,3.9636,3.9518,3.9426,4.0006,3.994,4.0692,4.0691,4.0587,4.0584,3.9945,4.0832,4.0702,4.0634,4.0644,4.0654,3.9986,3.9184,4.1203,3.9009,4.1442,4.0602,3.9624,3.8639,4.1575,4.0741,4.0575,3.8696,3.9274,3.9426,3.9378,3.8992,3.9077,4.0635,4.1038,4.0596,4.0431,4.0451,4.0469,4.0486,4.0502,4.0516,4.0529,4.0166,3.9715,3.984,4.0478,4.0083,4.0073,3.9944,4.0477,4.0881,4.0521,3.9898,3.9331,3.9833,3.9443,3.9968,3.9781,3.9655,4.0295,4.0631,3.9349,3.987,4.0883,3.943,4.0111,4.0986,4.0426,4.0435,4.0449,4.0463,4.0475,4.0486,4.0496,3.9046,3.8478,3.8811,3.8503,3.842,3.8439,3.9729,3.9729,3.8066,3.8874,3.9927,4.0147,4.0352,4.0219,4.0155,4.0154,4.0178,3.9225,3.9221,3.975,3.9714,3.9302,3.9487,4.0296,3.9972,3.9585,4.058,3.9651,3.9417,3.9899,3.9724,3.966,3.9629,3.9703,3.9698,4.0237,3.9475,3.9967,3.993,3.9554,3.98,3.9885,4.0611,4.0225,4.0231,3.9882,3.9197,3.9068,3.8968,3.9549,3.9483,4.0228,4.0235,4.0141,4.0141,3.9506,4.0383,4.0263,4.02,4.0213,4.0225,3.9556,3.8735,4.0741,3.8552,4.0988,4.016,3.9185,3.8181,4.1106,4.0285,4.0127,3.824,3.8816,3.8967,3.8919,3.8535,3.862,4.0141,4.0545,4.0119,3.9962,3.9984,4.0005,4.0024,4.0041,4.0057,4.0072,3.9718,3.9267,3.9388,4.0013,3.9628,3.9618,3.9491,4.001,4.0411,4.0063,3.9453,3.888,3.9378,3.8991,3.9508,3.9325,3.9201,3.9825,4.0154,3.8899,3.9412,4.0398,3.898,3.9646,4.05,3.9959,3.9969,3.9985,3.9999,4.0012,4.0024,4.0035,3.8601,3.8043,3.8375,3.8077,3.8002,3.8024,3.9278,3.9275,3.7664,3.8451,3.9468,3.9678,3.9873,3.9746,3.9685,3.9685,3.9709,3.8785,3.8782,3.9299,3.9264,3.8863,3.9044,3.9824,3.9513,3.914,4.0098,3.9203,3.8976,3.9444,3.9275,3.9213,3.9184,3.9256,3.9252,3.977,3.9034,3.9511,3.9476,3.9112,3.9351,3.9433,4.0132,3.9761,3.9766,3.943,3.8764,3.8641,3.8546,3.9113,3.905,3.9765,3.9772,3.9681,3.9681,3.9068,3.9914,3.9798,3.9738,3.9751,3.9762,3.9116,3.8316,4.0263,3.8143,4.0504,3.9701,3.8756,3.7786,4.0623,3.9822,3.9671,3.784,3.8408,3.8558,3.8512,3.8141,3.8227,3.9695,4.0082,3.9668,3.9517,3.9538],"dfn":[4.0932,4.0931,4.093,4.0929,4.0928,4.0545,4.0102,4.0233,4.0867,4.0464,4.0453,4.0329,4.0858,4.1253,4.0879,4.025,3.974,4.0224,3.9865,4.0373,4.0195,4.008,4.0701,4.1026,3.9791,4.0296,4.1282,3.9864,4.053,4.1385,4.0826,4.0829,4.0838,4.0846,4.0852,4.0857,4.0862,3.9465,3.8986,3.9298,3.9027,3.8951,3.8975,4.0186,4.0239,3.8678,3.9436,4.0431,4.0663,4.0871,4.0751,4.0689,4.0683,4.0702,3.9783,3.9773,4.0276,4.024,3.9847,4.0019,4.0799,4.0488,4.0113,4.1073,4.017,3.9942,4.0403,4.0233,4.017,4.0139,4.021,4.0205,4.0728,3.9992,4.046,4.0427,4.0062,4.0295,4.0379,4.1088,4.0713,4.0714,4.0366,3.9709,3.9583,3.9486,4.0033,3.9978,4.0704,4.0721,4.0633,4.0632,4.0013,4.0863,4.0748,4.0684,4.0694,4.0703,4.0044,3.9277,4.1174,3.9101,4.1428,4.064,3.9702,3.875,4.1511,4.0769,4.0616,3.8838,3.9324,3.9471,3.9428,3.9068,3.9131,4.0581,4.1014,4.0636,4.0489,4.0512,4.0532,4.055,4.0566,4.0579,4.0591,4.024,3.9797,3.99,4.0502,4.0135,4.0124,3.9999,4.0496,4.0906,4.0568,3.9972,3.9403,3.9874,3.9502,3.9993,3.9828,3.9709,4.0305,4.0644,3.9438,3.9909,4.0872,3.953,4.0136,4.0978,4.0474,4.0484,4.05,4.0513,4.0525,4.0535,4.0544,3.9172,3.8597,3.8855,3.8565,3.8468,3.8483,3.9666,3.9754,3.819,3.8945,3.9914,4.0156,4.0374,4.0277,4.0234,4.0236,4.0261,3.9367,3.9335,3.9826,3.9793,3.9405,3.9566,4.0323,4.0039,3.968,4.06,3.9748,3.9506,3.9958,3.9794,3.9731,3.9696,3.9765,3.976,4.0267,3.9561,4.0009,3.9985,3.9629,3.9847,3.9936,4.062,4.0278,4.0283,3.9952,3.929,3.9148,3.904,3.9572,3.952,4.0227,4.0255,4.018,4.0184,3.9581,4.0401,4.0302,4.0245,4.0258,4.027,3.9625,3.8857,4.0686,3.8662,4.094,4.0193,3.9282,3.8302,4.1006,4.0305,4.0164,3.8404,3.8868,3.9012,3.8969,3.8611,3.8673,4.0084,4.0511,4.0154,4.0017,4.0042,4.0064,4.0084,4.0102,4.0117,4.0131,3.9794,3.9355,3.945,4.0031,3.9681,3.967,3.9546,4.0024,4.0427,4.0107,3.9533,3.8955,3.9418,3.905,3.9532,3.9372,3.9254,3.9832,4.0163,3.8989,3.9449,4.0381,3.9083,3.967,4.0485,4.0004,4.0016,4.0033,4.0047,4.006,4.0071,4.0081,3.8735,3.8152,3.8412,3.8127,3.8038,3.8058,3.9226,3.9303,3.7765,3.8517,3.9464,3.9693,3.9901,3.9807,3.9765,3.9767,3.9791,3.892,3.889,3.9372,3.9341,3.8961,3.912,3.9854,3.9579,3.923,4.0121,3.9297,3.906,3.9502,3.9343,3.9282,3.9248,3.9315,3.9311,3.9801,3.9115,3.9552,3.9529,3.9183,3.9397,3.9483,4.0143,3.9812,3.9817,3.9497,3.8847,3.871,3.8606,3.9133,3.9082,3.9767,3.9792,3.9719,3.9723,3.9137,3.9932,3.9836,3.9781,3.9794,3.9805,3.9178,3.8418,4.0213,3.8229,4.0462,3.9732,3.8841,3.7873,4.0534,3.9841,3.9704,3.797,3.8444,3.859,3.8549,3.8195,3.8261,3.9645,4.0055,3.9701,3.9567,3.9591],"stats":{"spm1C":[1.6839748096850353,26.926298308861618],"spmDrive":[5.078755250826863,20.215474640404185],"dfn1C":[12.77379657430765,20.599819623212667],"dfn2C":[33.13209973013917,75.55255802461059],"dfnHPPC":[8.254345180512402,28.877828634712444],"dfnDrive":[6.010904645120352,16.340090903984805],"plainSpmDrive":[18.570451882448168,50.736965428840094]}};
+
+</script>
+<script>
+(function(){
+'use strict';
+const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+const ui={playing:true,speed:60,mode:'temp',sel:6*NP+3,tab:'overview',interacted:false,showTags:true,actual:60};
+let sim,session=null;
+const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
+const fmtTime=t=>{t=Math.floor(t);return [Math.floor(t/3600),Math.floor(t/60)%60,t%60].map(x=>String(x).padStart(2,'0')).join(':');};
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C=k=>k-K0;
+
+function restart(){
+  const prof=sim?sim.profile:'wmtc1';
+  sim=createSim(7,+$('#amb').value,+$('#soc0').value);sim.profile=prof;
+  session=null;renderSession();bleFx.idle();hsRender([]);
+  simLog(sim,'info',null,`Simulation started: ${NS}S${NP}P LG M50 pack near ${Math.round(+$('#soc0').value*100)} % SOC at ${$('#amb').value} °C; ${PROFILES[prof]}`);
+  resetSmoke();
+}
+
+/* ---------------- BLE ---------------- */
+const enc=new TextEncoder();
+const rand=n=>crypto.getRandomValues(new Uint8Array(n));
+const hex=b=>Array.from(b).map(x=>x.toString(16).padStart(2,'0')).join('');
+const shortHex=h=>h.slice(0,10)+'…'+h.slice(-6);
+const cat=(a,b)=>{const c=new Uint8Array(a.length+b.length);c.set(a);c.set(b,a.length);return c;};
+function safeEq(a,b){if(a.length!==b.length)return false;let d=0;for(let i=0;i<a.length;i++)d|=a[i]^b[i];return d===0;}
+async function hmac(key,data){const k=await crypto.subtle.importKey('raw',key,{name:'HMAC',hash:'SHA-256'},false,['sign']);return new Uint8Array(await crypto.subtle.sign('HMAC',k,data));}
+const devices=[
+  {id:'rider-phone',name:"Rider's phone",note:'Registered key, owner role',key:rand(32)},
+  {id:'service-tool',name:'Service tool',note:'Registered key, technician role',key:rand(32)},
+  {id:'unknown-phone',name:'Unregistered phone',note:'Has a key, but not one the Pi knows',key:rand(32)},
+  {id:'replay',name:'Replay attacker',note:"Resends a sniffed response from the rider's phone",claims:'rider-phone'}];
+const registry={'rider-phone':{key:devices[0].key,role:'owner'},'service-tool':{key:devices[1].key,role:'technician'}};
+let captured=null,bleBusy=false;const fails={},lockUntil={};const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function renderDevices(){$('#devices').innerHTML=devices.map((d,i)=>`<li><strong>${d.name}</strong><span>${d.note}</span><button data-dev="${i}" ${bleBusy?'disabled':''}>Connect</button></li>`).join('');}
+function hsRender(steps){$('#handshake').innerHTML=steps.length?steps.map(s=>`<li class="${s.c||''}">${s.t}</li>`).join(''):'<li class="muted" style="list-style:none;margin-left:-20px">Connect a device to watch the challenge and response.</li>';}
+async function connect(dev){
+  if(bleBusy)return;bleBusy=true;renderDevices();
+  const steps=[],push=(t,c)=>{steps.push({t,c});hsRender(steps);};const claimed=dev.claims||dev.id;
+  bleFx.start();push(`${dev.name} asks to open a session as <span class="code">${claimed}</span>.`);await wait(450);
+  const now=performance.now();
+  if(lockUntil[claimed]>now){push(`Rejected: <span class="code">${claimed}</span> is locked for another ${Math.ceil((lockUntil[claimed]-now)/1000)} s after three failed attempts.`,'bad');bleFx.end(false);bleBusy=false;renderDevices();return;}
+  const nonce=rand(16);push(`Edge node sends a fresh 16-byte challenge: <span class="code">${shortHex(hex(nonce))}</span>`);await wait(450);
+  let mac;
+  if(dev.claims){if(!captured){push("Nothing captured yet. Connect the rider's phone first so there is traffic to replay.",'bad');bleFx.end(false);bleBusy=false;renderDevices();return;}
+    mac=captured.mac;push(`Attacker resends the response it sniffed earlier: <span class="code">${shortHex(hex(mac))}</span>`);}
+  else{mac=await hmac(dev.key,cat(nonce,enc.encode(claimed)));push(`Device returns HMAC-SHA256(key, challenge + ID): <span class="code">${shortHex(hex(mac))}</span>`);}
+  await wait(450);
+  const reg=registry[claimed];let ok=false,reason='';
+  if(!reg)reason='no key is registered for this device ID';
+  else{const expect=await hmac(reg.key,cat(nonce,enc.encode(claimed)));ok=safeEq(expect,mac);if(!ok)reason=dev.claims?'the response was computed for an old challenge':'the signature does not match the registered key';}
+  if(ok){fails[claimed]=0;if(claimed==='rider-phone')captured={mac};session={dev,role:reg.role};push(`Accepted. Session open with ${reg.role} permissions.`,'ok');simLog(sim,'ble',null,`${dev.name} authenticated (${reg.role})`);}
+  else{fails[claimed]=(fails[claimed]||0)+1;push(`Rejected: ${reason}. Attempt ${fails[claimed]} of 3.`,'bad');simLog(sim,'ble',null,`${dev.name} rejected: ${reason}`);
+    if(fails[claimed]>=3){lockUntil[claimed]=performance.now()+30000;fails[claimed]=0;push(`<span class="code">${claimed}</span> locked for 30 s.`,'bad');simLog(sim,'ble',null,`${claimed} locked for 30 s`);}}
+  bleFx.end(ok);bleBusy=false;renderDevices();renderSession();
+}
+function renderSession(){
+  const el=$('#session');
+  if(!session){el.className='session';el.innerHTML='<p class="muted">No device connected.</p>';return;}
+  const tech=session.role==='technician';el.className='session live';
+  el.innerHTML=`<p><strong>${session.dev.name}</strong> connected as ${session.role}.</p>
+    <p class="muted" style="font-size:13px">${tech?'Can read telemetry and alerts, export logs and reset protection.':'Can read live telemetry and alerts. Cannot change pack state.'}</p>
+    <div class="phone-view"><div><small>SOC</small><b class="num" id="pvSoc">–</b></div><div><small>Range left</small><b class="num" id="pvR">–</b></div><div><small>Alerts</small><b class="num" id="pvA">–</b></div></div>
+    <div class="row"><button id="resetProt" ${tech?'':'disabled'}>Reset protection</button><button id="disconnect">Disconnect</button></div>
+    ${tech?'':'<p class="muted" style="font-size:13px;margin-top:6px">Reset protection needs the technician role.</p>'}<p class="msg" id="sessMsg"></p>`;
+  $('#disconnect').onclick=()=>{simLog(sim,'ble',null,`${session.dev.name} disconnected`);session=null;bleFx.idle();renderSession();};
+  $('#resetProt').onclick=()=>{if(!session||session.role!=='technician')return;const r=resetProtection(sim);const m=$('#sessMsg');m.textContent=r.msg;m.className='msg '+(r.ok?'ok':'bad');if(!r.ok)simLog(sim,'ble',null,'Reset refused: '+r.msg);};
+}
+
+/* ---------------- colours ---------------- */
+const RAMPS={soc:[[0,'#E5484D'],[0.2,'#F2B134'],[0.5,'#3FB8A8'],[1,'#3A7BD5']],temp:[[0,'#3A7BD5'],[0.35,'#3FB8A8'],[0.6,'#F2B134'],[1,'#E5484D']],
+  cur:[[0,'#3FB8A8'],[0.33,'#62748F'],[0.66,'#F2B134'],[1,'#E5484D']],anomaly:[[0,'#62748F'],[0.6,'#F2B134'],[1,'#E5484D']]};
+const MODES={
+  temp:{ramp:'temp',min:'20 °C',max:'90 °C',x:c=>(C(c.Tc)-20)/70},
+  soc:{ramp:'soc',min:'0 %',max:'100 %',x:c=>cellSOC(c)},
+  current:{ramp:'cur',min:'−3 A',max:'9 A',x:c=>(c.Ie+3)/12},
+  voltage:{ramp:'soc',min:'3.0 V',max:'4.2 V',x:c=>(sim.sensors.cellV[c.s].val-3)/1.2},
+  anomaly:{ramp:'anomaly',min:'0',max:'1',x:c=>sim.bms.anomaly[c.s]}};
+const rampCache={};
+function rampColor(name,x,out){const st=rampCache[name]||(rampCache[name]=RAMPS[name].map(([p,c])=>[p,new THREE.Color(c)]));x=clamp(x,0,1);
+  for(let i=0;i<st.length-1;i++)if(x<=st[i+1][0])return out.copy(st[i][1]).lerp(st[i+1][1],(x-st[i][0])/(st[i+1][0]-st[i][0]));return out.copy(st[st.length-1][1]);}
+function updateLegend(){const m=MODES[ui.mode];$('#legMin').textContent=m.min;$('#legMax').textContent=m.max;$('#legBar').style.background=`linear-gradient(90deg,${RAMPS[m.ramp].map(([p,c])=>`${c} ${p*100}%`).join(',')})`;}
+
+/* ---------------- 3D ---------------- */
+const stage=$('#stage'),canvas=$('#three');
+let renderer,scene,camera,cellMeshes=[],cellMats=[],edgeMat,floorMat,wireParticles=[],curve,phoneScreen,rings=[],tags=[],smoke=[],ledMat,fan;
+const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const orbit={theta:0.72,phi:1.0,r:74,target:null};
+const bleFx={state:'idle',t:0,result:null,start(){this.state='connecting';this.t=0;},end(ok){this.state='result';this.result=ok;this.t=0;},idle(){this.state='idle';}};
+const SP=2.3,H=7;const cellPos=(s,p)=>new THREE.Vector3((s-(NS-1)/2)*SP,H/2,(p-(NP-1)/2)*SP);
+function build3D(){
+  orbit.target=new THREE.Vector3(6,3,0);
+  renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
+  scene=new THREE.Scene();camera=new THREE.PerspectiveCamera(36,1,0.1,800);
+  scene.add(new THREE.HemisphereLight(0xdfe8ff,0x1a2233,0.85));
+  const dl=new THREE.DirectionalLight(0xffffff,0.75);dl.position.set(-30,50,30);scene.add(dl);
+  const dl2=new THREE.DirectionalLight(0xffe2c8,0.25);dl2.position.set(40,15,-40);scene.add(dl2);
+  const fc=document.createElement('canvas');fc.width=fc.height=256;const fx=fc.getContext('2d'),grd=fx.createRadialGradient(128,128,10,128,128,128);
+  grd.addColorStop(0,'rgba(255,255,255,0.9)');grd.addColorStop(1,'rgba(255,255,255,0)');fx.fillStyle=grd;fx.fillRect(0,0,256,256);
+  floorMat=new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(fc),transparent:true,opacity:0.35,depthWrite:false});
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(130,80),floorMat);floor.rotation.x=-Math.PI/2;floor.position.set(6,-0.6,0);scene.add(floor);
+  const W=NS*SP+3,D=NP*SP+3;
+  const base=new THREE.Mesh(new THREE.BoxGeometry(W,0.6,D),new THREE.MeshStandardMaterial({color:0x2a3346,roughness:0.8}));base.position.y=-0.3;scene.add(base);
+  const cellGeo=new THREE.CylinderGeometry(1.06,1.06,H,26),capGeo=new THREE.CylinderGeometry(0.62,0.62,0.14,20);
+  const capMat=new THREE.MeshStandardMaterial({color:0xc9ced6,metalness:0.8,roughness:0.3});
+  const nickel=new THREE.MeshStandardMaterial({color:0xb9bfc7,metalness:0.7,roughness:0.35});
+  for(let s=0;s<NS;s++){
+    for(let p=0;p<NP;p++){
+      const mat=new THREE.MeshStandardMaterial({color:0x3a7bd5,roughness:0.45,metalness:0.1,emissive:0x000000});cellMats.push(mat);
+      const m=new THREE.Mesh(cellGeo,mat);m.position.copy(cellPos(s,p));m.userData.k=s*NP+p;scene.add(m);cellMeshes.push(m);
+      const c=new THREE.Mesh(capGeo,capMat);c.position.copy(cellPos(s,p));c.position.y=H+0.07;scene.add(c);
+    }
+    const x=(s-(NS-1)/2)*SP;
+    const strip=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.08,NP*SP),nickel);strip.position.set(x,H+0.2,0);scene.add(strip);
+    const bot=strip.clone();bot.position.y=-0.02;scene.add(bot);
+    if(s<NS-1){const link=new THREE.Mesh(new THREE.BoxGeometry(SP,0.08,1.4),nickel);link.position.set(x+SP/2,s%2===0?H+0.22:0,(s%2===0?1:-1)*(NP*SP/2-0.6));scene.add(link);}
+  }
+  const encGeo=new THREE.BoxGeometry(W,H+3,D);
+  const encF=new THREE.Mesh(encGeo,new THREE.MeshBasicMaterial({color:0x8fa3c4,transparent:true,opacity:0.04,depthWrite:false}));encF.position.y=(H+3)/2-0.3;scene.add(encF);
+  edgeMat=new THREE.LineBasicMaterial({color:0x8e9db8,transparent:true,opacity:0.5});
+  const edges=new THREE.LineSegments(new THREE.EdgesGeometry(encGeo),edgeMat);edges.position.y=(H+3)/2-0.3;scene.add(edges);
+  const xEnd=W/2, zF=-D/2;
+  const green=new THREE.MeshStandardMaterial({color:0x1f6b47,roughness:0.6}),black=new THREE.MeshStandardMaterial({color:0x1b1e24,roughness:0.6});
+  const metal=new THREE.MeshStandardMaterial({color:0xc8cdd4,metalness:0.8,roughness:0.3}),copper=new THREE.MeshStandardMaterial({color:0xc9844f,metalness:0.6,roughness:0.35});
+  const add=(geo,mat,x,y,z,parent=scene)=>{const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);parent.add(m);return m;};
+  // AFE board with IMU, standing at the +x end inside the enclosure
+  add(new THREE.BoxGeometry(0.2,6,12),green,xEnd-0.6,4,0);
+  add(new THREE.BoxGeometry(0.3,1.6,1.6),black,xEnd-0.8,5,-2);add(new THREE.BoxGeometry(0.3,0.6,0.6),black,xEnd-0.8,2.4,3.4);
+  const shunt=add(new THREE.BoxGeometry(3.4,0.45,1.3),copper,xEnd-3,H+0.6,zF+1.4);
+  const cont=add(new THREE.BoxGeometry(2.6,2.4,2.6),black,xEnd-3.2,H+1.4,-zF-2.2);
+  add(new THREE.BoxGeometry(1.4,0.5,0.5),new THREE.MeshStandardMaterial({color:0x6b4a2b}),xEnd-6,H+0.5,-zF-2.2);
+  const bme=add(new THREE.BoxGeometry(1.4,0.12,1.4),new THREE.MeshStandardMaterial({color:0x3b2e6e}),-2,H+2.4,-2);
+  const h2s=add(new THREE.CylinderGeometry(0.8,0.8,0.8,20),metal,3,H+2.2,-2);
+  // thermistor beads
+  const bead=new THREE.SphereGeometry(0.34,12,12),beadMat=new THREE.MeshStandardMaterial({color:0x111111});
+  NTC_POS.forEach(pp=>{const v=cellPos(pp.s,pp.p);add(bead,beadMat,v.x,H+0.4,v.z);});
+  // Pi 5 outside
+  const pi=new THREE.Group();pi.position.set(xEnd+11,0.6,0);scene.add(pi);
+  add(new THREE.BoxGeometry(8.5,0.16,5.6),green,0,0,0,pi);add(new THREE.BoxGeometry(1.6,0.2,1.6),metal,-0.6,0.18,0.2,pi);
+  fan=add(new THREE.CylinderGeometry(1.2,1.2,0.5,28),black,-0.6,0.62,0.2,pi);
+  add(new THREE.BoxGeometry(1.7,1.5,1.3),metal,3.5,0.83,-1.6,pi);add(new THREE.BoxGeometry(1.7,1.5,1.3),metal,3.5,0.83,0.1,pi);add(new THREE.BoxGeometry(1.7,1.3,1.6),metal,3.5,0.73,1.9,pi);
+  add(new THREE.BoxGeometry(5.1,0.5,0.5),black,-0.6,0.33,-2.45,pi);
+  ledMat=new THREE.MeshBasicMaterial({color:0x3fb8a8});add(new THREE.SphereGeometry(0.12,10,10),ledMat,-3.9,0.2,2.5,pi);
+  curve=new THREE.CatmullRomCurve3([new THREE.Vector3(xEnd-0.4,6,-3),new THREE.Vector3(xEnd+3,8.5,-2.5),new THREE.Vector3(xEnd+8,4,-2.2),new THREE.Vector3(pi.position.x-0.6,1.3,-2.0)]);
+  scene.add(new THREE.Mesh(new THREE.TubeGeometry(curve,64,0.14,8,false),new THREE.MeshStandardMaterial({color:0x5b92e0,roughness:0.5})));
+  const pg=new THREE.SphereGeometry(0.22,12,12);for(let i=0;i<7;i++){const m=new THREE.Mesh(pg,new THREE.MeshBasicMaterial({color:0xbfd8ff}));m.userData.u=i/7;scene.add(m);wireParticles.push(m);}
+  const phone=new THREE.Group();phone.position.set(xEnd+13,13,-13);phone.rotation.set(-0.25,-0.6,0);scene.add(phone);
+  phone.add(new THREE.Mesh(new THREE.BoxGeometry(2.6,5.0,0.3),new THREE.MeshStandardMaterial({color:0x22262e,roughness:0.4,metalness:0.4})));
+  phoneScreen=new THREE.Mesh(new THREE.PlaneGeometry(2.3,4.6),new THREE.MeshBasicMaterial({color:0x2a3346}));phoneScreen.position.z=0.16;phone.add(phoneScreen);
+  const mid=new THREE.Vector3(xEnd+12,7,-6.5);
+  for(let i=0;i<3;i++){const r=new THREE.Mesh(new THREE.TorusGeometry(1.2,0.06,8,48),new THREE.MeshBasicMaterial({color:0x5b92e0,transparent:true,opacity:0}));r.position.copy(mid);r.lookAt(phone.position);r.userData.o=i/3;scene.add(r);rings.push(r);}
+  const T=(t,p,minor)=>{const el=document.createElement('div');el.className='tag3d'+(minor?' minor':'');el.textContent=t;$('#tags').appendChild(el);tags.push({el,p,minor});};
+  T('13S8P pack, 104 × LG M50',new THREE.Vector3(-6,H+4.8,0));
+  T('AFE + IMU',new THREE.Vector3(xEnd-0.6,7.6,4));T('Shunt',shunt.position.clone().add(new THREE.Vector3(0,0.9,0)),true);
+  T('Contactor',cont.position.clone().add(new THREE.Vector3(0,1.8,0)),true);T('BME688',bme.position.clone().add(new THREE.Vector3(0,0.6,0)),true);
+  T('H₂ sensor',h2s.position.clone().add(new THREE.Vector3(0,1,0)),true);
+  NTC_POS.forEach((pp,i)=>{const v=cellPos(pp.s,pp.p);T('T'+(i+1),new THREE.Vector3(v.x,H+1.3,v.z),true);});
+  T('Raspberry Pi 5 edge node',new THREE.Vector3(pi.position.x,3.2,0));T('Phone over BLE',new THREE.Vector3(phone.position.x,phone.position.y+3.2,phone.position.z));
+  applyTheme();resize();new ResizeObserver(resize).observe(stage);setupOrbit();
+}
+function applyTheme(){if(!edgeMat)return;edgeMat.color.set(css('--muted')||'#8e9db8');floorMat.color.set(css('--grid')||'#9fb0c8');}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',applyTheme);
+function resize(){const w=stage.clientWidth,h=stage.clientHeight;if(!w||!h)return;renderer.setSize(w,h,false);camera.aspect=w/h;if(w<600)orbit.r=Math.max(orbit.r,95);camera.updateProjectionMatrix();}
+function placeCamera(){const {theta,phi,r,target}=orbit;camera.position.set(target.x+r*Math.sin(phi)*Math.sin(theta),target.y+r*Math.cos(phi),target.z+r*Math.sin(phi)*Math.cos(theta));camera.lookAt(target);}
+function setupOrbit(){
+  const pts=new Map();let downPos=null,moved=false,pinch0=0,r0=0;const ray=new THREE.Raycaster(),ndc=new THREE.Vector2();
+  const pick=e=>{const rc=canvas.getBoundingClientRect();ndc.set(((e.clientX-rc.left)/rc.width)*2-1,-((e.clientY-rc.top)/rc.height)*2+1);ray.setFromCamera(ndc,camera);const h=ray.intersectObjects(cellMeshes)[0];return h?h.object.userData.k:null;};
+  canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);pts.set(e.pointerId,{x:e.clientX,y:e.clientY});downPos={x:e.clientX,y:e.clientY};moved=false;ui.interacted=true;if(pts.size===2){const [a,b]=[...pts.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);r0=orbit.r;}});
+  canvas.addEventListener('pointermove',e=>{
+    if(!pts.has(e.pointerId)){canvas.classList.toggle('hovering',pick(e)!==null);return;}
+    const p=pts.get(e.pointerId),dx=e.clientX-p.x,dy=e.clientY-p.y;p.x=e.clientX;p.y=e.clientY;
+    if(Math.hypot(e.clientX-downPos.x,e.clientY-downPos.y)>4)moved=true;
+    if(pts.size===1){orbit.theta-=dx*0.006;orbit.phi=clamp(orbit.phi-dy*0.006,0.15,1.5);canvas.classList.add('dragging');}
+    else if(pts.size===2){const [a,b]=[...pts.values()];const d=Math.hypot(a.x-b.x,a.y-b.y);if(pinch0)orbit.r=clamp(r0*pinch0/d,30,150);}
+  });
+  canvas.addEventListener('pointerup',e=>{if(pts.has(e.pointerId)&&!moved&&pts.size===1){const k=pick(e);if(k!=null){ui.sel=k;syncTargetSelects();}}pts.delete(e.pointerId);canvas.classList.remove('dragging');});
+  canvas.addEventListener('pointercancel',e=>pts.delete(e.pointerId));
+  canvas.addEventListener('wheel',e=>{e.preventDefault();ui.interacted=true;orbit.r=clamp(orbit.r*(1+e.deltaY*0.001),30,150);},{passive:false});
+}
+const smokeGeo=()=>new THREE.SphereGeometry(0.7,10,10);
+function resetSmoke(){smoke.forEach(s=>s.parts.forEach(m=>scene&&scene.remove(m)));smoke=[];}
+function ensureSmoke(c){
+  if(smoke.find(s=>s.k===c.k))return;const parts=[];const v=cellPos(c.s,c.p);
+  for(let i=0;i<10;i++){const m=new THREE.Mesh(smokeGeo(),new THREE.MeshBasicMaterial({color:0x9aa3ad,transparent:true,opacity:0.5,depthWrite:false}));m.userData.ph=i/10;m.position.set(v.x,H,v.z);scene.add(m);parts.push(m);}
+  smoke.push({k:c.k,parts,base:v});
+}
+let tmpC,hotC;
+function update3D(rdt){
+  if(!renderer)return;
+  if(!tmpC){tmpC=new THREE.Color();hotC=new THREE.Color('#ff5a1f');}
+  if(!ui.interacted&&!reduceMotion)orbit.theta+=rdt*0.03;
+  placeCamera();
+  const m=MODES[ui.mode];
+  for(const c of sim.cells){
+    const mat=cellMats[c.k];
+    if(c.dead&&ui.mode!=='temp')mat.color.set(0x2b2f36);else rampColor(m.ramp,m.x(c),mat.color);
+    const heat=clamp((C(c.Ts)-90)/250,0,1);mat.emissive.copy(hotC).multiplyScalar(heat);
+    if(ui.sel===c.k){tmpC.copy(mat.color).multiplyScalar(0.55);mat.emissive.add(tmpC);}
+    if(c.vented)ensureSmoke(c);
+  }
+  const t=performance.now()/1000;
+  smoke.forEach(sm=>{const c=sim.cells[sm.k];const act=c.tr?(sim.t-c.trT<400?1:0.3):0.5;sm.parts.forEach(p=>{const ph=(p.userData.ph+t*(c.tr?0.35:0.18))%1;p.position.set(sm.base.x+Math.sin(ph*9+sm.k)*ph*1.5,H+0.5+ph*9,sm.base.z+Math.cos(ph*7+sm.k)*ph*1.5);p.scale.setScalar(0.5+ph*2.2*act);p.material.opacity=(1-ph)*0.45*act;p.material.color.set(c.tr&&ph<0.25&&sim.t-c.trT<200?0xff8a3d:0x9aa3ad);});});
+  wireParticles.forEach(p=>{if(ui.playing)p.userData.u=(p.userData.u+rdt*0.22)%1;p.position.copy(curve.getPointAt(p.userData.u));});
+  if(ui.playing&&!reduceMotion)fan.rotation.y+=rdt*8;
+  ledMat.color.set(sim.contactor&&sim.bms.thermalLevel===0?0x3fb8a8:(Math.floor(performance.now()/400)%2?0xe5484d:0x3a1414));
+  bleFx.t+=rdt;const connecting=bleFx.state==='connecting',res=bleFx.state==='result'&&bleFx.t<1.8;
+  rings.forEach(r=>{if(connecting||res){const ph=(r.userData.o+bleFx.t*0.9)%1;r.scale.setScalar(0.4+ph*2.4);r.material.opacity=(1-ph)*0.8;r.material.color.set(connecting?0x5b92e0:(bleFx.result?0x3fb8a8:0xe5484d));}else r.material.opacity=0;});
+  phoneScreen.material.color.set(session?(session.role==='technician'?0xd08a55:0x3fb8a8):(res&&!bleFx.result?0x6b2226:0x2a3346));
+  const w=stage.clientWidth,h=stage.clientHeight,v=new THREE.Vector3();
+  tags.forEach(tg=>{v.copy(tg.p).project(camera);const vis=v.z<1&&ui.showTags&&!(tg.minor&&w<600);tg.el.style.display=vis?'':'none';if(vis){tg.el.style.left=((v.x+1)/2*w)+'px';tg.el.style.top=((1-v.y)/2*h)+'px';}});
+}
+
+/* ---------------- charts ---------------- */
+function drawChart(cv,series,ymin,ymax,opts={}){
+  const dpr=Math.min(2,devicePixelRatio||1),w=cv.clientWidth,h=cv.clientHeight;if(!w)return;
+  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);}
+  const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,w,h);
+  const L=36,R=8,T=8,B=8,pw=w-L-R,ph=h-T-B,Y=v=>T+ph*(1-(v-ymin)/(ymax-ymin));
+  c.font='11px Barlow, system-ui, sans-serif';c.fillStyle=css('--muted');c.strokeStyle=css('--line');c.lineWidth=1;
+  (opts.ticks||[ymin,(ymin+ymax)/2,ymax]).forEach(t=>{const y=Math.round(Y(t))+0.5;c.beginPath();c.moveTo(L,y);c.lineTo(w-R,y);c.stroke();c.fillText(String(t),4,y+4);});
+  if(opts.threshold!=null){c.setLineDash([4,4]);c.strokeStyle=css('--bad');c.beginPath();c.moveTo(L,Y(opts.threshold));c.lineTo(w-R,Y(opts.threshold));c.stroke();c.setLineDash([]);}
+  const n=opts.n||900;
+  series.forEach(s=>{const d=s.data;if(d.length<2)return;c.strokeStyle=s.color;c.lineWidth=s.w||1.7;c.setLineDash(s.dash||[]);c.beginPath();
+    d.forEach((v,i)=>{const x=L+pw*(i+(n-d.length))/(n-1),y=Y(clamp(v,ymin,ymax));i?c.lineTo(x,y):c.moveTo(x,y);});c.stroke();c.setLineDash([]);});
+}
+
+/* ---------------- panels ---------------- */
+const LVL=['Normal','Level 1: abnormal heating','Level 2: off-gas detected','Level 3: venting or thermal runaway'];
+function banner(el,sub){const L=sim.bms.thermalLevel;el.className='banner'+(L?' l'+L:'');el.querySelector('strong').textContent=LVL[L];
+  sub.textContent=sim.cmdContactor?(sim.welded?'Contactor welded':'Contactor closed'):(sim.welded?'Commanded open, but welded':'Contactor open, protection latched');}
+function syncTargetSelects(){const c=sim.cells[ui.sel];$('#fGroup').value=c.s;$('#fCell').value=c.p;updateInspect();}
+function updateInspect(){
+  const c=sim.cells[ui.sel];if(!c)return;const B=sim.bms,S=sim.sensors;
+  const flags=[];if(isFinite(c.Risc)&&!c.sepGone)flags.push(`short ${c.Risc<1?(c.Risc*1000).toFixed(0)+' mΩ':c.Risc.toFixed(1)+' Ω'}`);if(c.heaterW)flags.push('hot spot');if(c.weldR>0.001)flags.push('cracked weld');
+  const st=c.tr?'Thermal runaway':c.vented?'Vented, disconnected':flags.length?flags.join(', '):'Healthy';
+  const ntc=S.ntc.find(n=>n.cell===c.k);
+  $('#inspect').innerHTML=`<h3>Cell ${c.s+1}.${c.p+1} <span class="muted" style="font-weight:400">group ${c.s+1}</span></h3><dl>
+    <dt>Core / surface</dt><dd class="num">${C(c.Tc).toFixed(1)} / ${C(c.Ts).toFixed(1)} °C</dd>
+    <dt>Cell current</dt><dd class="num">${c.dead?'0.00':c.Ie.toFixed(2)} A</dd>
+    <dt>True SOC</dt><dd class="num">${(cellSOC(c)*100).toFixed(1)} %</dd>
+    <dt>Group reading</dt><dd class="num">${S.cellV[c.s].val.toFixed(3)} V</dd>
+    <dt>Thermistor</dt><dd>${ntc?ntc.id+' on this cell':'none on this cell'}</dd>
+    <dt>Group anomaly</dt><dd class="num" style="color:${B.alert[c.s]?'var(--bad)':'inherit'}">${B.anomaly[c.s].toFixed(2)}</dd>
+    <dt>Status</dt><dd>${st}</dd></dl>`;
+}
+const fmtI=I=>Math.abs(I)<0.2?'0.0<small>A</small>':`${Math.abs(I).toFixed(1)}<small>A ${I>0?'out':'in'}</small>`;
+function stTd(ok,msg){return `<td class="${ok?'st-ok':'st-bad'}">${msg}</td>`;}
+function updateUI(){
+  const B=sim.bms,S=sim.sensors;
+  $('#simTime').textContent=fmtTime(sim.t);$('#actualSpeed').textContent=Math.round(ui.actual)+'×';
+  const chip=$('#contactorChip');chip.textContent=sim.contactor?(sim.cmdContactor?'Contactor closed':'Contactor welded shut'):'Contactor open';chip.classList.toggle('open',!sim.cmdContactor);
+  const items=[];
+  B.latched.forEach((v,k)=>items.push(`<li class="trip">${k}${v.grp!=null?` (group ${v.grp+1})`:''}: ${v.detail}. Contactor latched open.</li>`));
+  B.sensorFault.forEach(msg=>items.push(`<li class="sensor">${msg}</li>`));
+  for(let s=0;s<NS;s++)if(B.alert[s])items.push(`<li>Group ${s+1}: ${B.alertKind[s]} (score ${B.anomaly[s].toFixed(2)})</li>`);
+  const badge=$('#faultBadge');badge.hidden=!items.length;badge.textContent=items.length;
+  const H=B.hist;
+  if(ui.tab==='overview'){
+    banner($('#banner'),$('#bannerSub'));
+    $('#mSpd').innerHTML=`${(sim.veh.v*3.6).toFixed(1)}<small>km/h</small>`;
+    $('#mP').innerHTML=`${(S.stack.val*S.shunt.val/1000).toFixed(2)}<small>kW</small>`;
+    $('#mV').innerHTML=`${S.stack.val.toFixed(2)}<small>V</small>`;$('#mI').innerHTML=fmtI(S.shunt.val);
+    const okN=S.ntc.slice(0,7).filter(n=>n.val>-30&&n.val<140);const hn=okN.reduce((a,n)=>n.val>a.val?n:a,okN[0]||S.ntc[0]);
+    $('#mT').innerHTML=`${hn.val.toFixed(1)}<small>°C, ${hn.id}</small>`;
+    const hc=sim.cells.reduce((a,c)=>c.Tc>a.Tc?c:a);$('#mTc').innerHTML=`${C(hc.Tc).toFixed(1)}<small>°C, ${hc.s+1}.${hc.p+1}</small>`;
+    sim.eUsed=sim.eUsed||0;const km=sim.veh.dist/1000;$('#mE').innerHTML=km>0.2?`${(sim.eWh/km).toFixed(1)}<small>Wh/km</small>`:'–';
+    $('#mD').innerHTML=`${km.toFixed(2)}<small>km</small>`;
+    drawChart($('#chartSpd'),[{data:H.vt,color:css('--muted'),w:2.2},{data:H.v,color:css('--accent')}],0,100,{ticks:[0,50,100]});
+    drawChart($('#chartSoc'),[{data:H.soc,color:css('--muted'),w:2.4},{data:H.cc,color:css('--cobalt'),dash:[5,4]},{data:H.est,color:css('--accent')}],0,100,{ticks:[0,50,100]});
+    drawChart($('#chartI'),[{data:H.I,color:css('--cobalt')}],-30,90,{ticks:[-30,0,30,60,90]});
+    const st=B.socTrue*100,se=B.x[0]*100,sc=B.cc*100;
+    $('#socErr').textContent=`Now: true ${st.toFixed(1)} %, EKF ${se.toFixed(1)} % (${(se-st>=0?'+':'')+(se-st).toFixed(1)} points), coulomb counting ${sc.toFixed(1)} % (${(sc-st>=0?'+':'')+(sc-st).toFixed(1)}).`;
+  }
+  if(ui.tab==='sensors'){
+    $('#sV').innerHTML=S.cellV.map((c,s)=>{const ok=c.val>0.5&&c.val<4.8;return `<tr><td>${s+1}</td><td class="r num">${c.raw}</td><td class="r num truth">${sim.cells[s*NP].dead&&sim.cells.slice(s*NP,s*NP+NP).every(x=>x.dead)?'open':sim.cells[s*NP].Vg.toFixed(4)}</td><td class="r">${sim.bleed[s]?'60 mA':'–'}</td>${stTd(ok,ok?'OK':'Implausible')}</tr>`;}).join('');
+    $('#sT').innerHTML=S.ntc.map(n=>{const ok=n.val>-30&&n.val<140;const truth=n.cell!=null?C(sim.cells[n.cell].Tc).toFixed(1):(n.node==='term'?C(sim.term).toFixed(1):C(sim.amb+3).toFixed(1));return `<tr><td>${n.id}</td><td>${n.where}</td><td class="r num">${n.counts}</td><td class="r num">${n.val.toFixed(1)}</td><td class="r num truth">${truth}</td>${stTd(ok,ok?(n.fault==='detached'?'OK (reads air)':'OK'):'Open or short')}</tr>`;}).join('');
+    const rows=[
+      ['Shunt 100 µΩ, AFE coulomb counter',`${S.shunt.raw} µV`,`${S.shunt.val.toFixed(2)} A`,sim.I.toFixed(2)+' A'],
+      ['Hall-effect sensor, redundant',`${S.hall.raw} mV`,`${S.hall.val.toFixed(2)} A`,sim.I.toFixed(2)+' A'],
+      ['Stack voltage (AFE)',`${S.stack.raw} ×10 mV`,`${S.stack.val.toFixed(2)} V`,sim.Vstack.toFixed(2)+' V'],
+      ['PACK+ after contactor',`${S.plus.raw} ×10 mV`,`${S.plus.val.toFixed(2)} V`,sim.Vplus.toFixed(2)+' V'],
+      ['Contactor auxiliary contact','–',S.aux.closed?'Closed':'Open',sim.contactor?'Closed':'Open']];
+    $('#sI').innerHTML=rows.map(r=>`<tr><td>${r[0]}</td><td class="r num">${r[1]}</td><td class="r num">${r[2]}</td><td class="r num truth">${r[3]}</td></tr>`).join('');
+    const e=[['BME688 temperature',`${S.env.T.toFixed(1)} °C`,'Enclosure air'],['BME688 humidity',`${S.env.RH.toFixed(0)} %RH`,'Condensation risk below dew point'],
+      ['BME688 pressure',`${S.env.P.toFixed(2)} kPa`,`Gauge ${(S.env.P-101.325).toFixed(2)} kPa`],['BME688 gas resistance',`${S.env.gasKohm.toFixed(0)} kΩ`,'Falls when electrolyte vapour appears'],
+      ['H₂ sensor',S.h2.fault==='unplugged'?'no signal':`${S.h2.ppm.toFixed(1)} ppm`,'Main vent-gas marker'],
+      ['IMU longitudinal',`${S.imu.ax.toFixed(2)} g`,`Peak this second ${S.imu.peak.toFixed(1)} g`],['IMU vertical',`${S.imu.az.toFixed(2)} g`,'Road vibration grows with speed'],
+      ['Motor controller speed (CAN)',`${(S.can.speed*3.6).toFixed(1)} km/h`,''],['Motor controller DC current (CAN)',`${(S.can.idc||0).toFixed(1)} A`,'Cross-check for the shunt']];
+    $('#sE').innerHTML=e.map(r=>`<tr><td>${r[0]}</td><td class="r num">${r[1]}</td><td class="muted">${r[2]}</td></tr>`).join('');
+  }
+  if(ui.tab==='faults'){
+    banner($('#banner2'),$('#bannerSub2'));
+    $('#alerts').innerHTML=items.length?items.join(''):'<li class="empty">No alerts. All checks pass.</li>';
+    if(!sim.cmdContactor&&!session)$('#alerts').insertAdjacentHTML('beforeend','<li class="trip">Connect the service tool in BLE access to reset protection.</li>');
+    drawChart($('#chartA'),[{data:H.anom,color:css('--warn')}],0,1,{threshold:0.6,ticks:[0,0.5,1]});
+    drawChart($('#chartG'),[{data:H.gas.map(x=>x/1.3),color:css('--cobalt')},{data:H.h2,color:css('--bad')}],0,100,{ticks:[0,50,100]});
+  }
+  if(session&&$('#pvSoc')){$('#pvSoc').textContent=(B.x[0]*100).toFixed(0)+'%';const whkm=sim.veh.dist>500?sim.eWh/(sim.veh.dist/1000):25;$('#pvR').textContent=Math.round(B.x[0]*CELL.Qnom*NP*47/whkm)+' km';$('#pvA').textContent=items.length;}
+  if(ui.tab==='log'){
+    $('#rowCounts').textContent=`Rows written: telemetry ${B.telCount}, events ${sim.evCount}.`;
+    $('#evRows').innerHTML=sim.events.slice(-14).reverse().map(e=>`<tr><td class="num">${fmtTime(e.t)}</td><td class="lv-${e.level}">${e.level}</td><td>${e.grp!=null?e.grp+1:''}</td><td>${e.msg}</td></tr>`).join('');
+    $('#telRows').innerHTML=B.telem.slice(-8).reverse().map(r=>`<tr class="num"><td>${r.ts.toFixed(0)}</td><td>${r.pack_v.toFixed(2)}</td><td>${r.current_a.toFixed(2)}</td><td>${r.soc_est.toFixed(3)}</td><td>${r.t_max.toFixed(1)}</td><td>${r.h2_ppm.toFixed(1)}</td><td>${r.anomaly_max.toFixed(2)}</td></tr>`).join('');
+  }
+  if(ui.tab==='model')drawModel();
+  updateInspect();
+}
+function drawModel(){
+  drawChart($('#chartVal'),[{data:VAL.dfn,color:css('--muted'),w:2.4},{data:VAL.model,color:css('--accent'),w:1.4}],3.4,4.1,{ticks:[3.4,3.75,4.1],n:VAL.dfn.length});
+}
+function fillStatic(){
+  $('#profile').innerHTML=Object.entries(PROFILES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+  $('#fGroup').innerHTML=Array.from({length:NS},(_,i)=>`<option value="${i}">${i+1}</option>`).join('');
+  $('#fCell').innerHTML=Array.from({length:NP},(_,i)=>`<option value="${i}">${i+1}</option>`).join('');
+  $('#fNtc').innerHTML=sim.sensors.ntc.map((n,i)=>`<option value="${i}">${n.id}, ${n.where}</option>`).join('');
+  const s=VAL.stats,row=(t,v)=>`<tr><td>${t}</td><td class="r num">${v[0].toFixed(1)} mV</td><td class="r num">${v[1].toFixed(1)} mV</td></tr>`;
+  $('#valRows').innerHTML=[row('Particle solver vs PyBaMM SPM, 1C discharge',s.spm1C),row('Particle solver vs PyBaMM SPM, drive cycle',s.spmDrive),
+    row('Full model vs DFN, pulse test (fitting set)',s.dfnHPPC),row('Full model vs DFN, 1C discharge (fitting set)',s.dfn1C),row('Full model vs DFN, 2C discharge (fitting set)',s.dfn2C),
+    row('Full model vs DFN, drive cycle (held out)',s.dfnDrive),row('Plain SPM without fitted terms vs DFN, drive cycle',s.plainSpmDrive)].join('')+
+    `<tr><td>Heat generation vs DFN thermal model, 1C</td><td class="r num">0.06 W</td><td class="r num">mean 0.84 vs 0.78 W</td></tr>`;
+}
+
+/* ---------------- wiring ---------------- */
+function wire(){
+  $('#play').onclick=()=>{ui.playing=!ui.playing;$('#play').textContent=ui.playing?'Pause':'Play';};
+  $('#restart').onclick=restart;
+  $$('#speedSeg button').forEach(b=>b.onclick=()=>{ui.speed=+b.dataset.speed;$$('#speedSeg button').forEach(x=>x.setAttribute('aria-pressed',x===b));});
+  $$('.modes button').forEach(b=>b.onclick=()=>{ui.mode=b.dataset.mode;$$('.modes button').forEach(x=>x.setAttribute('aria-pressed',x===b));updateLegend();});
+  $('#showTags').onchange=e=>{ui.showTags=e.target.checked;};
+  $('#profile').onchange=e=>{sim.profile=e.target.value;sim.chg.done=false;simLog(sim,'info',null,'Duty cycle: '+PROFILES[sim.profile]);};
+  $('#amb').oninput=e=>{sim.amb=+e.target.value+K0;$('#ambVal').textContent=e.target.value+' °C';};
+  $('#fGroup').onchange=$('#fCell').onchange=()=>{ui.sel=+$('#fGroup').value*NP+ +$('#fCell').value;updateInspect();};
+  $$('[data-fault]').forEach(b=>b.onclick=()=>{injectFault(sim,b.dataset.fault,ui.sel,+$('#fNtc').value);if(!ui.playing)$('#play').click();});
+  $('#repair').onclick=()=>repairAll(sim);
+  $('#devices').addEventListener('click',e=>{const b=e.target.closest('[data-dev]');if(b)connect(devices[+b.dataset.dev]);});
+  $$('.tabs [role=tab]').forEach(b=>b.onclick=()=>{ui.tab=b.dataset.tab;$$('.tabs [role=tab]').forEach(x=>x.setAttribute('aria-selected',x===b));$$('.pane').forEach(p=>p.hidden=p.dataset.pane!==ui.tab);updateUI();});
+}
+
+/* ---------------- boot ---------------- */
+restart();fillStatic();wire();renderDevices();updateLegend();syncTargetSelects();
+let ok3D=true;
+try{if(!window.THREE)throw new Error('three.js did not load');build3D();}
+catch(err){ok3D=false;const f=document.createElement('div');f.className='fallback';f.textContent='The 3D view could not start in this browser ('+err.message+'). The simulation and dashboard still run.';stage.appendChild(f);}
+let last=performance.now(),uiAcc=1,debt=0,speedAvg=60;
+function frame(now){
+  const rdt=Math.min(0.1,(now-last)/1000);last=now;
+  if(ui.playing){
+    debt=Math.min(debt+rdt*ui.speed,ui.speed*0.2);let n=0;const t0=performance.now();
+    while(debt>=1&&performance.now()-t0<12){const P0=sim.I*sim.Vstack;stepSim(sim,1);sim.eWh=(sim.eWh||0)+Math.max(0,sim.veh.Pb)/3600;debt-=1;n++;}
+    speedAvg=0.95*speedAvg+0.05*(rdt>0?n/rdt:0);ui.actual=Math.min(ui.speed,speedAvg);
+  }
+  if(ok3D){update3D(rdt);renderer.render(scene,camera);}
+  uiAcc+=rdt;if(uiAcc>0.25){uiAcc=0;updateUI();}
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+
+</script>
+</body>
+</html>
+

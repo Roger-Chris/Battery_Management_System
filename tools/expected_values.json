@@ -1,0 +1,127 @@
+{
+  "divider": {
+    "ratio": 0.16666666666666666,
+    "source_impedance_ohm": 176666.66666666666,
+    "tap_V_at_full_charge": [
+      4.2,
+      8.4,
+      12.600000000000001,
+      16.8
+    ],
+    "adc_V_at_full_charge": [
+      0.7,
+      1.4,
+      2.1,
+      2.8
+    ],
+    "adc_lsb_V": 0.000125,
+    "tap_referred_lsb_mV": 0.75,
+    "worst_ratio_error_pct": 0.16677785190126748,
+    "worst_tap_error_mV": [
+      7.004669779853235,
+      14.00933955970647,
+      21.014009339559703,
+      28.01867911941294
+    ],
+    "worst_cell_error_mV_uncalibrated": [
+      7.004669779853235,
+      21.014009339559703,
+      35.02334889926617,
+      49.03268845897264
+    ],
+    "loading_gain_error_pct": {
+      "Zin_6MOhm": 2.8602266594711274
+    },
+    "diode_leak_cell_referred_error_mV": {
+      "1nA": 1.06,
+      "10nA": 10.6,
+      "100nA": 105.99999999999999
+    },
+    "divider_current_uA": [
+      3.5,
+      7.0,
+      10.500000000000002,
+      14.0
+    ],
+    "current_through_cell_uA": [
+      35.00000000000001,
+      31.5,
+      24.5,
+      14.0
+    ],
+    "cell1_vs_cell4_imbalance_mAh_per_day": 0.5040000000000001
+  },
+  "ina226": {
+    "full_scale_A": 8.192,
+    "shunt_resolution_A": 0.00025,
+    "current_lsb_A": 0.00025,
+    "calibration_register": 2048.0,
+    "bus_lsb_V": 0.00125,
+    "shunt_W_at_5A": 0.25
+  },
+  "load": {
+    "dac_lsb_V": 0.0008056640625,
+    "dac_lsb_A_without_divider": 0.008056640624999998,
+    "dac_lsb_A": 0.0007976871905940594,
+    "dac_full_scale_A": 3.267326732673267,
+    "firmware_cap_A": 1.25,
+    "resistor_W_at_cap": 15.625,
+    "sense_W_at_cap": 0.15625,
+    "rows": [
+      {
+        "pack_V": 16.8,
+        "max_current_A": 1.6592592592592594,
+        "resistor_W_at_max": 27.531412894375862,
+        "mosfet_worst_W": 6.986138613861387,
+        "mosfet_worst_at_A": 0.8316831683168318
+      },
+      {
+        "pack_V": 16.0,
+        "max_current_A": 1.5802469135802468,
+        "resistor_W_at_max": 24.97180307879896,
+        "mosfet_worst_W": 6.336633663366337,
+        "mosfet_worst_at_A": 0.7920792079207921
+      },
+      {
+        "pack_V": 14.8,
+        "max_current_A": 1.4617283950617284,
+        "resistor_W_at_max": 21.366499009297364,
+        "mosfet_worst_W": 5.421782178217822,
+        "mosfet_worst_at_A": 0.7326732673267328
+      },
+      {
+        "pack_V": 13.2,
+        "max_current_A": 1.3037037037037036,
+        "resistor_W_at_max": 16.99643347050754,
+        "mosfet_worst_W": 4.312871287128712,
+        "mosfet_worst_at_A": 0.6534653465346535
+      },
+      {
+        "pack_V": 12.0,
+        "max_current_A": 1.1851851851851851,
+        "resistor_W_at_max": 14.046639231824416,
+        "mosfet_worst_W": 3.5643564356435644,
+        "mosfet_worst_at_A": 0.594059405940594
+      }
+    ],
+    "required_heatsink_C_per_W": 10.982653061224488,
+    "mosfet_tj_bound_C_budget_build": 100.25980198019802,
+    "mosfet_tj_worst_C_with_530002B02500G": 66.43762376237623
+  },
+  "ds18b20": {
+    "accuracy_C": 0.5,
+    "accuracy_range": "-10 to +85 C",
+    "resolution_C": {
+      "9": 0.5,
+      "10": 0.25,
+      "11": 0.125,
+      "12": 0.0625
+    },
+    "conversion_ms": {
+      "9": 93.75,
+      "10": 187.5,
+      "11": 375,
+      "12": 750
+    }
+  }
+}
