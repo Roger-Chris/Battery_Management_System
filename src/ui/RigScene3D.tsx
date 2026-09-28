@@ -3,20 +3,28 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { BOM } from "../core/config/bom";
 import type { Parameter } from "../core/config/provenance";
+import { runChargeSimulation, type ChargeSimulationSample } from "../core/sim/runCharge";
 import { runDischargeSimulation, type DischargeSample } from "../core/sim/runDischarge";
 
 type ComponentId = "pack" | "holder" | "bms" | "charger" | "relay" | "fuse" | "xt60" | "divider" | "adsA" | "adsB" | "inaPack" | "inaLoad" | "dac" | "opAmp" | "breadboard" | "mosfet" | "resistor" | "heatsink" | "fan" | "pi" | "hub" | "adapter" | "probes";
 interface ComponentInfo { id: ComponentId; name: string; kind: string; description: string; location: THREE.Vector3; }
-type ConditionId = "idle" | "light" | "t7" | "ceiling" | "low-soc" | "warm";
-const CONDITIONS: Record<ConditionId, { title: string; currentA: number; initialSoc: number; ambientC: number; summary: string }> = {
-  idle: { title: "No-load baseline", currentA: 0, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, summary: "Checks the model's open-load voltage and sensor baseline." },
-  light: { title: "Light load · 0.4 A", currentA: 0.4, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, summary: "Shows pack sag and telemetry under a light constant load." },
-  t7: { title: "T7 capacity preview · 1.0 A", currentA: 1, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, summary: "The existing provisional T7-style constant-current discharge preview." },
-  ceiling: { title: "Load ceiling · 1.25 A", currentA: 1.25, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, summary: "Runs at the simulator's configured firmware current limit." },
-  "low-soc": { title: "Low starting charge · 25%", currentA: 1, initialSoc: 0.25, ambientC: BOM.thermalDesign.ambientC.value, summary: "Starts with a partly discharged pack to observe voltage and protection readouts." },
-  warm: { title: "Warm ambient · 45 °C", currentA: 1, initialSoc: 1, ambientC: 45, summary: "Repeats the nominal load with a warmer ambient temperature input." },
+type ConditionId = "idle" | "light" | "t7" | "ceiling" | "low-soc" | "warm" | "pulse" | "charge" | "charge-hot";
+interface PreviewCondition { title: string; summary: string; mode: "discharge" | "charge"; currentA: number; initialSoc: number; ambientC: number; durationS: number; initialCellTempC?: number; }
+const CONDITIONS: Record<ConditionId, PreviewCondition> = {
+  idle: { title: "No-load baseline", mode: "discharge", currentA: 0, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Checks the model's open-load voltage and sensor baseline." },
+  light: { title: "Light load · 0.4 A", mode: "discharge", currentA: 0.4, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Shows pack sag and telemetry under a light constant load." },
+  t7: { title: "T7 capacity preview · 1.0 A", mode: "discharge", currentA: 1, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "The existing provisional T7-style constant-current discharge preview." },
+  ceiling: { title: "Load ceiling · 1.25 A", mode: "discharge", currentA: 1.25, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Runs at the simulator's configured firmware current limit." },
+  "low-soc": { title: "Low starting charge · 25%", mode: "discharge", currentA: 1, initialSoc: 0.25, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Starts with a partly discharged pack to observe voltage and protection readouts." },
+  warm: { title: "Warm ambient discharge · 45 °C", mode: "discharge", currentA: 1, initialSoc: 1, ambientC: 45, durationS: 300, summary: "Repeats the nominal load with a warmer ambient temperature input." },
+  pulse: { title: "Load pulse train · 0.4 ↔ 1.25 A", mode: "discharge", currentA: 0.4, initialSoc: 0.8, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Steps the electronic load every 8 seconds to show voltage sag and recovery." },
+  charge: { title: "Charge cycle · CC to CV taper", mode: "charge", currentA: 2, initialSoc: 0.65, ambientC: 25, initialCellTempC: 25, durationS: 2400, summary: "Runs the charger model from constant-current charging into a voltage-limited taper." },
+  "charge-hot": { title: "Warm-cell charge · 45 °C cutoff", mode: "charge", currentA: 2, initialSoc: 0.65, ambientC: 44, initialCellTempC: 44, durationS: 600, summary: "A warm-start cell heats under charge; the software limit opens the charge relay at 45 °C." },
 };
 const parameterAt = <T,>(parameter: Parameter<T>, value: T): Parameter<T> => ({ ...parameter, value });
+type DischargeRigSample = DischargeSample & { mode: "discharge"; charge_current_a: 0; charge_relay_closed: false; charger_phase: "idle"; charge_cutoff_reason: null; cell_core_temp_c: number };
+type RigSample = DischargeRigSample | ChargeSimulationSample;
+interface RigSimulationResult { durationS: number; samples: RigSample[]; warnings: string[]; }
 
 // The supplied top-down drawing uses a 10 mm grid. Its grid spacing is about 30 px.
 const layoutPoint = (px: number, py: number, height = 0) => new THREE.Vector3((px - 850) / 30, height, (600 - py) / 30);
@@ -58,7 +66,7 @@ function labelSprite(text: string): THREE.Sprite {
   sprite.scale.set(5.6, 1.0, 1); sprite.renderOrder = 20; sprite.visible = false; return sprite;
 }
 
-function useTelemetry(samples: DischargeSample[], conditionId: ConditionId) {
+function useTelemetry(samples: RigSample[], conditionId: ConditionId) {
   const [index, setIndex] = useState(0); const [playing, setPlaying] = useState(false);
   useEffect(() => { setPlaying(false); setIndex(0); }, [conditionId]);
   useEffect(() => {
@@ -73,16 +81,35 @@ function useTelemetry(samples: DischargeSample[], conditionId: ConditionId) {
 }
 
 export default function RigScene3D() {
-  const hostRef = useRef<HTMLDivElement>(null); const telemetryRef = useRef<DischargeSample | null>(null);
+  const hostRef = useRef<HTMLDivElement>(null); const telemetryRef = useRef<RigSample | null>(null);
   const [conditionId, setConditionId] = useState<ConditionId>("t7");
   const condition = CONDITIONS[conditionId];
-  const result = useMemo(() => runDischargeSimulation({
-    testId: `PREVIEW-${conditionId.toUpperCase()}`,
-    durationS: BOM.simulation.demoDurationS,
-    initialSoc: parameterAt(BOM.simulation.initialSoc, condition.initialSoc),
-    dischargeCurrentA: parameterAt(BOM.simulation.dischargeCurrentA, condition.currentA),
-    ambientC: parameterAt(BOM.thermalDesign.ambientC, condition.ambientC),
-  }), [conditionId, condition]);
+  const result = useMemo<RigSimulationResult>(() => {
+    const testId = `PREVIEW-${conditionId.toUpperCase()}`;
+    if (condition.mode === "charge") return runChargeSimulation({
+      testId,
+      durationS: condition.durationS,
+      initialSoc: condition.initialSoc,
+      initialCellTempC: condition.initialCellTempC ?? condition.ambientC,
+      ambientC: condition.ambientC,
+      requestedCurrentA: condition.currentA,
+    });
+    const discharge = runDischargeSimulation({
+      testId,
+      durationS: parameterAt(BOM.simulation.demoDurationS, condition.durationS),
+      initialSoc: parameterAt(BOM.simulation.initialSoc, condition.initialSoc),
+      dischargeCurrentA: parameterAt(BOM.simulation.dischargeCurrentA, condition.currentA),
+      ambientC: parameterAt(BOM.thermalDesign.ambientC, condition.ambientC),
+      currentProfile: conditionId === "pulse" ? (timeS) => Math.floor(timeS / 8) % 2 === 0 ? 0.4 : 1.25 : undefined,
+    });
+    return {
+      ...discharge,
+      samples: discharge.samples.map((sample): DischargeRigSample => ({
+        ...sample, mode: "discharge", charge_current_a: 0, charge_relay_closed: false,
+        charger_phase: "idle", charge_cutoff_reason: null, cell_core_temp_c: sample.cell_temp_c,
+      })),
+    };
+  }, [conditionId, condition]);
   const playback = useTelemetry(result.samples, conditionId); const [selected, setSelected] = useState<ComponentId>("pack"); const [sceneError, setSceneError] = useState("");
   const sample = playback.sample; const selectedPart = PARTS.find((part) => part.id === selected)!;
   telemetryRef.current = sample;
@@ -128,6 +155,7 @@ export default function RigScene3D() {
       bench: mat(0x40372f, .9), tile: mat(0xd9d5cc, .88), tileEdge: mat(0x8f8b83, .8), holder: mat(0x17191d, .66), pink: mat(0xd981a4, .38), pinkEdge: mat(0xb65377, .55), steel: mat(0xb8bec5, .25, .84), gold: mat(0xd1ae57, .32, .7), green: mat(0x1c7b50, .58, .18), blue: mat(0x2167ae, .52, .18), purple: mat(0x69459b, .5, .16), white: mat(0xe8e5dd, .76), black: mat(0x171b20, .35, .25), chip: mat(0x222830, .32, .36), cableRed: mat(0xc83930, .5), cableBlack: mat(0x171a1e, .48), wireBlue: mat(0x3182e8, .48), wireYellow: mat(0xe7b83c, .48), wireOrange: mat(0xe5822e, .48), wireGreen: mat(0x29975b, .48), wirePurple: mat(0x8e56b8, .48), wireGray: mat(0x91959b, .5), fan: mat(0x242a30, .46, .2), resistor: mat(0xcaa448, .38, .35), wood: mat(0x74553c, .84), probe: mat(0xa6b0b8, .34, .7), resistorBody: mat(0xd2bd93, .48, .14), pcbBlack: mat(0x20252c, .32, .25), led: mat(0x53d68a, .23, .08), red: mat(0xc6443c, .55), blueStripe: mat(0x466ca7, .55),
     };
     const clickable: THREE.Object3D[] = []; const groups = new Map<ComponentId, THREE.Group>(); const labels = new Map<ComponentId, THREE.Sprite>();
+    const cellWraps: THREE.MeshStandardMaterial[] = [];
     const box = (parent: THREE.Object3D, id: ComponentId | undefined, size: [number, number, number], pos: [number, number, number], material: THREE.Material, pick = true) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material); mesh.position.set(...pos); mesh.castShadow = true; mesh.receiveShadow = true;
       if (id) mesh.userData.componentId = id; parent.add(mesh); if (id && pick) clickable.push(mesh); return mesh;
@@ -168,7 +196,8 @@ export default function RigScene3D() {
     const pack = partGroup("pack", 260, 610, "DMEGC INR18650-26E · 4S1P", 5.15);
     const batteryXs = [-2.82, -.94, .94, 2.82];
     batteryXs.forEach((x, index) => {
-      const cell = cyl(pack, "pack", mm(18.45) / 2, mm(18.45) / 2, mm(65.2), [x, .96, 0], materials.pink, 32); cell.rotation.x = Math.PI / 2;
+      const wrap = materials.pink.clone(); cellWraps.push(wrap);
+      const cell = cyl(pack, "pack", mm(18.45) / 2, mm(18.45) / 2, mm(65.2), [x, .96, 0], wrap, 32); cell.rotation.x = Math.PI / 2;
       for (const z of [-mm(65.2) / 2, mm(65.2) / 2]) {
         const ring = cyl(pack, "pack", mm(18.45) / 2 + .015, mm(18.45) / 2 + .015, .06, [x, .96, z], materials.pinkEdge, 32); ring.rotation.x = Math.PI / 2;
         const cap = cyl(pack, "pack", mm(15.5) / 2, mm(15.5) / 2, .035, [x, .96, z + (z > 0 ? .035 : -.035)], materials.steel, 24); cap.rotation.x = Math.PI / 2;
@@ -198,6 +227,9 @@ export default function RigScene3D() {
     box(charger, "charger", [2.8, .5, .45], [2.8, 1.05, 2.92], materials.steel, false);
     const relay = board("relay", 570, 215, 50, 26, materials.blue, "5 V · 10 A RELAY", 1);
     box(relay, "relay", [2.0, .28, 1.4], [-.7, .44, 0], materials.chip);
+    const relayLedMat = new THREE.MeshStandardMaterial({ color: 0x68717b, emissive: 0x17191c, emissiveIntensity: .3, roughness: .25 });
+    const relayLed = new THREE.Mesh(new THREE.SphereGeometry(.17, 14, 10), relayLedMat); relayLed.position.set(1.55, .5, .2); relay.add(relayLed);
+    const heatGlow = new THREE.Color(0xf15a24);
     const fuse = partGroup("fuse", 486, 728, "5 A ATO FUSE", 2.0);
     box(fuse, "fuse", [3.5, .5, 1.25], [0, .25, 0], materials.black);
     box(fuse, "fuse", [1.5, .3, .82], [0, .62, 0], materials.red);
@@ -317,21 +349,27 @@ export default function RigScene3D() {
     wire([[645, 1042, 2.1], [645, 930, 1.92], [1340, 930, 1.85], [1340, 400, 1.75]], materials.wireGray, .045);
     wire([[1050, 1038, 1.35], [1050, 916, 1.3], [1360, 916, 1.3], [1360, 950, 1.25]], materials.wireOrange, .075);
     wire([[1050, 1038, 1.32], [982, 916, 1.28], [982, 740, 1.24], [990, 720, 1.22]], materials.wireOrange, .06);
-    // The charger path is drawn grey and stays electrically idle during a discharge.
+    // The charger path is drawn grey; animated charge particles appear only while its relay is closed.
     wire([[258, 270, 1.25], [450, 270, 1.22], [570, 270, 1.18], [570, 228, 1.15], [615, 228, 1.12], [615, 510, 1.1], [370, 510, 1.05]], materials.wireGray, .075);
+    makeRoute([[258, 270, 1.3], [450, 270, 1.25], [570, 270, 1.22], [570, 228, 1.2], [615, 228, 1.18], [615, 510, 1.14], [370, 510, 1.1]], materials.wirePurple, 0xffcf70, .08, 8, .12, () => telemetryRef.current?.charge_relay_closed ?? false);
 
     // Idle tie-point and component callout dots, plus selected-part labels.
     labels.get("pack")!.visible = true;
     const clock = new THREE.Clock();
     const animate = () => {
       const time = clock.getElapsedTime(); controls.update(); const live = telemetryRef.current;
-      const load = Math.max(.25, Math.min(1.6, (live?.ina1_current_a ?? 0) / .8));
+      const load = Math.max(.25, Math.min(1.6, Math.abs(live?.ina1_current_a ?? 0) / .8));
       for (const path of curves) path.particles.forEach((particle, index) => {
         const u = (time * path.speed * load + index / path.particles.length) % 1; particle.position.copy(path.curve.getPointAt(u)); particle.visible = path.active();
       });
       const fanPart = groups.get("fan")?.userData.fanBlades as THREE.Group | undefined;
       if (fanPart) fanPart.rotation.y = time * Math.max(.1, (live?.cell_temp_c ?? 25) / 20);
-      const hot = (live?.cell_temp_c ?? 25) > 45;
+      const temperature = live?.cell_temp_c ?? 25;
+      const heat = THREE.MathUtils.clamp((temperature - 38) / 7, 0, 1);
+      cellWraps.forEach((material) => { material.emissive.copy(heatGlow).multiplyScalar(heat); material.emissiveIntensity = .72 * heat; });
+      relayLedMat.color.set(live?.charge_relay_closed ? 0x62e69a : live?.charge_cutoff_reason ? 0xff554a : 0x68717b);
+      relayLedMat.emissive.set(live?.charge_relay_closed ? 0x1c8c55 : live?.charge_cutoff_reason ? 0xb92722 : 0x17191c);
+      const hot = temperature > 45;
       const resistorBody = groups.get("resistor")?.children.find((child) => child.type === "Mesh") as THREE.Mesh | undefined;
       if (resistorBody?.material instanceof THREE.MeshStandardMaterial) resistorBody.material.emissive.set(hot ? 0x64240d : 0x000000);
       renderer.render(scene, camera);
@@ -366,35 +404,64 @@ export default function RigScene3D() {
   const choose = (id: ComponentId) => { setSelected(id); window.dispatchEvent(new CustomEvent("rig-component-focus", { detail: id })); };
   const start = () => { if (playback.index >= result.samples.length - 1) playback.setIndex(0); playback.setPlaying(true); };
   const packVoltage = sample.cell_v.reduce((sum, voltage) => sum + voltage, 0);
+  const currentLabel = sample.mode === "charge" ? "Charge current" : "Discharge current";
+  const currentValue = sample.mode === "charge" ? sample.charge_current_a : sample.ina1_current_a;
+  const operatingStatus = sample.mode === "charge"
+    ? sample.charge_cutoff_reason ? `Cut off · ${sample.charge_cutoff_reason}` : sample.charge_relay_closed ? `Charging · ${sample.charger_phase.toUpperCase()}` : "Charger idle"
+    : sample.software_uv_trip ? "UV cut-off" : sample.bms_state;
+  const statusTripped = Boolean(sample.charge_cutoff_reason) || sample.software_uv_trip || sample.bms_state !== "normal";
   return <div className="rig-demo">
-    <div className="rig-demo-intro"><p>A scale-based 3D reconstruction from the supplied bench layout. Choose a discharge condition to see its readings and signal flow animate through the rig.</p><span className="badge">Model-only · no rig required</span></div>
+    <div className="rig-demo-intro"><p>A scale-based 3D reconstruction from the supplied bench layout. Choose a case to watch charging, temperature, protection and load signals move through the rig.</p><span className="badge">Model-only · no rig required</span></div>
     <section className="rig-condition panel" aria-label="Simulation conditions">
       <label htmlFor="rig-condition-select">Preview condition</label>
       <select id="rig-condition-select" value={conditionId} onChange={(event) => setConditionId(event.target.value as ConditionId)}>
         {Object.entries(CONDITIONS).map(([id, item]) => <option key={id} value={id}>{item.title}</option>)}
       </select>
-      <div className="rig-condition-info"><strong>{condition.currentA.toFixed(2)} A · {condition.initialSoc * 100}% SOC · {condition.ambientC} °C ambient</strong><span>{condition.summary} Each preview uses the same connected discharge model; it is not a completed physical test procedure.</span></div>
+      <div className="rig-condition-info"><strong>{condition.mode === "charge" ? `${condition.currentA.toFixed(1)} A charge · ${condition.initialCellTempC} °C start · ${condition.ambientC} °C ambient` : `${condition.currentA.toFixed(2)} A · ${condition.initialSoc * 100}% SOC · ${condition.ambientC} °C ambient`}</strong><span>{condition.summary} Model-only preview; the cell resistance and thermal response remain provisional.</span></div>
     </section>
     <section className="rig-screen panel">
       <div className="rig-screen-head"><div><strong>4S battery management rig</strong><span>Bench-layout reconstruction · 10 mm scene grid · estimated sizes marked</span></div><div className="rig-screen-actions"><span className="rig-interaction-hint">Drag to orbit · scroll to zoom · select a part</span><button className="rig-view-reset" onClick={() => window.dispatchEvent(new Event("rig-reset-view"))}>Reset view</button></div></div>
-      <div className="rig-stage" ref={hostRef} aria-label="Interactive Three.js reconstruction of the battery management rig" role="img"><div className="rig-scene-legend"><span><i className="power-key"/>Pack current</span><span><i className="sense-key"/>I²C data</span><span><i className="control-key"/>Load control</span><span><i className="temp-key"/>Temperature</span><span><i className="charge-key"/>Charge route · idle</span></div>{sceneError && <div className="rig-webgl-error">{sceneError}</div>}<div className="rig-stage-caption">4S1P · DMEGC INR18650-26E · PROVISIONAL MODEL</div></div>
-      <div className="rig-telemetry"><div><span>Pack voltage</span><strong>{packVoltage.toFixed(2)} <small>V</small></strong></div><div><span>Discharge current</span><strong>{sample.ina1_current_a.toFixed(2)} <small>A</small></strong></div><div><span>Cell temperature</span><strong>{sample.cell_temp_c.toFixed(1)} <small>°C</small></strong></div><div><span>State of charge</span><strong>{(sample.true_soc * 100).toFixed(1)} <small>%</small></strong></div><div><span>Protection state</span><strong className={sample.bms_state === "normal" ? "rig-state-ok" : "rig-state-trip"}>{sample.software_uv_trip ? "UV cut-off" : sample.bms_state}</strong></div></div>
+      <div className="rig-stage" ref={hostRef} aria-label="Interactive Three.js reconstruction of the battery management rig" role="img"><div className="rig-scene-legend"><span><i className="power-key"/>{sample.mode === "charge" ? "Charge power" : "Pack current"}</span><span><i className="sense-key"/>I²C data</span><span><i className="control-key"/>Load control</span><span><i className="temp-key"/>Cell heat</span><span className={sample.charge_relay_closed ? "charge-path-active" : sample.charge_cutoff_reason ? "charge-path-cutoff" : ""}><i className="charge-key"/>Charge route · {sample.charge_relay_closed ? "active" : sample.charge_cutoff_reason ? "cut off" : "idle"}</span></div>{sceneError && <div className="rig-webgl-error">{sceneError}</div>}<div className="rig-stage-caption">{sample.charge_cutoff_reason ? "CHARGE CUTOFF · RELAY OPEN" : sample.mode === "charge" ? `CHARGING · ${sample.charger_phase.toUpperCase()} PHASE` : "4S1P · DMEGC INR18650-26E · PROVISIONAL MODEL"}</div></div>
+      <div className="rig-telemetry"><div><span>Pack voltage</span><strong>{packVoltage.toFixed(2)} <small>V</small></strong></div><div><span>{currentLabel}</span><strong>{currentValue.toFixed(2)} <small>A</small></strong></div><div><span>Cell temperature</span><strong>{sample.cell_temp_c.toFixed(1)} <small>°C</small></strong></div><div><span>State of charge</span><strong>{(sample.true_soc * 100).toFixed(1)} <small>%</small></strong></div><div><span>Charger / protection</span><strong className={statusTripped ? "rig-state-trip" : "rig-state-ok"}>{operatingStatus}</strong></div></div>
+      <TemperatureTrace samples={result.samples} activeIndex={playback.index} chargeMode={condition.mode === "charge"} />
       <div className="rig-playback"><div className="rig-playback-controls"><button className="button primary" onClick={playback.playing ? () => playback.setPlaying(false) : start}>{playback.playing ? "Pause" : playback.index >= result.samples.length - 1 ? "Replay preview" : "Play preview"}</button><button className="button secondary" onClick={() => { playback.setPlaying(false); playback.setIndex(0); }}>Reset</button><span>Time <strong>{sample.timestamp_s.toFixed(0)} s</strong> / {result.durationS} s</span></div><input aria-label="Simulation time" type="range" min="0" max={result.samples.length - 1} value={playback.index} onChange={(event) => { playback.setPlaying(false); playback.setIndex(Number(event.target.value)); }} /><p>Red: pack current · Blue/yellow: I²C bus · Green: load control · Purple: relay · Grey: temperature leads</p></div>
     </section>
     <div className="rig-detail-grid"><section className="panel rig-part-panel"><div className="panel-head"><h2>Components</h2><span>{PARTS.length} selectable parts · including four cells and three probes</span></div><div className="rig-part-list">{PARTS.map((part) => <button key={part.id} className={`rig-part-button ${selected === part.id ? "selected" : ""}`} onClick={() => choose(part.id)}><span>{part.name}</span><small>{part.kind}</small></button>)}</div></section><section className="panel rig-part-detail"><span className="eyebrow">Selected component · {selectedPart.kind}</span><h2>{selectedPart.name}</h2><p>{selectedPart.description}</p><div className="rig-part-readout"><span>Current model reading</span><strong>{readingFor(selected, sample)}</strong></div></section></div>
-    <p className="rig-model-note">Reconstructed from the supplied top-down image; the 10 mm grid is used as the layout scale. Dimensions marked estimated and component textures are illustrative because photos and caliper measurements were not included. All scenario values remain provisional until compared with measurements from a physical build.</p>
+    <p className="rig-model-note">The charge and thermal cases use provisional cell resistance and heat-transfer values. The demo latches the relay open when the modeled 45 °C charge limit or cell over-voltage is reached. This is a visualization of software protection behavior, not a safety test or validated charger model.</p>
   </div>;
 }
 
-function readingFor(id: ComponentId, sample: DischargeSample): string {
+function TemperatureTrace({ samples, activeIndex, chargeMode }: { samples: RigSample[]; activeIndex: number; chargeMode: boolean }) {
+  const width = 720, height = 62, left = 10, right = 710, top = 5, bottom = 55;
+  const values = samples.map((item) => item.cell_temp_c);
+  let low = Math.floor(Math.min(...values) - 1), high = Math.ceil(Math.max(...values) + 1);
+  if (chargeMode) { low = Math.min(low, 38); high = Math.max(high, 46); }
+  if (high - low < 2) high = low + 2;
+  const y = (value: number) => bottom - ((value - low) / (high - low)) * (bottom - top);
+  const x = (index: number) => left + (index / Math.max(1, samples.length - 1)) * (right - left);
+  const line = values.map((value, index) => `${index ? "L" : "M"}${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(" ");
+  const active = samples[Math.min(activeIndex, samples.length - 1)]!;
+  return <div className="rig-temp-chart">
+    <div className="rig-temp-chart-head"><strong>Battery temperature</strong><span>{active.cell_temp_c.toFixed(1)} °C at {active.timestamp_s.toFixed(0)} s{chargeMode ? " · charge limit 45 °C" : ""}</span></div>
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Battery temperature over simulation time">
+      {[0, .5, 1].map((fraction) => <line key={fraction} x1={left} x2={right} y1={top + fraction * (bottom - top)} y2={top + fraction * (bottom - top)} className="rig-chart-grid" />)}
+      {chargeMode && <><line x1={left} x2={right} y1={y(45)} y2={y(45)} className="rig-chart-limit" /><text x={right - 2} y={y(45) - 3} textAnchor="end" className="rig-chart-limit-label">45 °C cutoff</text></>}
+      <path d={line} className={active.charge_cutoff_reason ? "rig-chart-line rig-chart-tripped" : "rig-chart-line"} />
+      <line x1={x(activeIndex)} x2={x(activeIndex)} y1={top} y2={bottom} className="rig-chart-cursor" />
+      <circle cx={x(activeIndex)} cy={y(active.cell_temp_c)} r="3.5" className="rig-chart-dot" />
+    </svg>
+  </div>;
+}
+
+function readingFor(id: ComponentId, sample: RigSample): string {
   const packV = sample.cell_v.reduce((sum, voltage) => sum + voltage, 0);
   switch (id) {
     case "pack": return `${packV.toFixed(2)} V · ${(sample.true_soc * 100).toFixed(1)}% SOC`;
     case "holder": return "4 cells · series holder · 18 AWG pack leads";
     case "bms": return sample.bms_state === "normal" ? "Monitoring · no BMS trip" : `Protection state · ${sample.bms_state}`;
     case "fuse": return "5 A path · trip behavior not simulated";
-    case "charger": return "Idle · discharge scenario";
-    case "relay": return "Charge path · not switching in discharge previews";
+    case "charger": return sample.mode === "charge" ? `${sample.charger_phase.toUpperCase()} · ${sample.charge_current_a.toFixed(2)} A` : "Idle · discharge scenario";
+    case "relay": return sample.charge_relay_closed ? "Closed · charge current flowing" : sample.charge_cutoff_reason ? `Open · ${sample.charge_cutoff_reason}` : "Open · no charge current";
     case "xt60": return "Pack connector · current path shown";
     case "divider": return `Four tap channels · ${sample.tap_v[3].toFixed(2)} V highest tap`;
     case "adsA": return `CH0 ${sample.adc_codes[0]} · CH1 ${sample.adc_codes[1]} counts`;
@@ -404,12 +471,12 @@ function readingFor(id: ComponentId, sample: DischargeSample): string {
     case "hub": return "I²C routing junction · bus timing simplified";
     case "pi": return `Preview telemetry · ${sample.timestamp_s.toFixed(0)} s`;
     case "breadboard": return "ADC · DAC · op-amp · divider circuit";
-    case "dac": return `Code ${sample.dac_code} · ${sample.requested_current_a.toFixed(2)} A requested`;
+    case "dac": return sample.mode === "charge" ? "Load command 0 · charger path active" : `Code ${sample.dac_code} · ${sample.requested_current_a.toFixed(2)} A requested`;
     case "opAmp": return "Load control active · analog response simplified";
     case "heatsink": return `${sample.cell_temp_c.toFixed(1)} °C cell reading · sink transient not modeled`;
     case "fan": return "12 V supply · fan spins during playback";
     case "mosfet": return sample.ina1_current_a > 0 ? "Conducting · load active" : "Off · load disconnected";
-    case "resistor": return `Dissipating ≈ ${(packV * sample.ina1_current_a).toFixed(1)} W · idealized`;
+    case "resistor": return sample.mode === "charge" ? "Off · electronic load disconnected" : `Dissipating ≈ ${(packV * sample.ina1_current_a).toFixed(1)} W · idealized`;
     case "adapter": return "12 V fan/control supply · provisional layout";
     case "probes": return `${sample.cell_temp_c.toFixed(1)} °C cell · ${sample.ambient_c.toFixed(1)} °C ambient`;
   }
