@@ -75,7 +75,7 @@ export default function RigScene3D() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75)); renderer.setSize(host.clientWidth, host.clientHeight); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     host.replaceChildren(renderer.domElement);
     const scene = new THREE.Scene(); scene.background = new THREE.Color("#11151b"); scene.fog = new THREE.Fog("#11151b", 25, 48);
-    const camera = new THREE.PerspectiveCamera(38, host.clientWidth / host.clientHeight, .1, 100); camera.position.set(13.5, 11.5, 14.5);
+    const camera = new THREE.PerspectiveCamera(38, host.clientWidth / host.clientHeight, .1, 100); camera.position.set(16, 13.5, 18);
     const controls = new OrbitControls(camera, renderer.domElement); controls.target.set(0, .6, 0); controls.enableDamping = true; controls.dampingFactor = .055; controls.minDistance = 8; controls.maxDistance = 34; controls.maxPolarAngle = Math.PI * .49;
     scene.add(new THREE.HemisphereLight(0xdbeaff, 0x17202d, 2.0));
     const key = new THREE.DirectionalLight(0xffffff, 3.0); key.position.set(-5, 12, 8); key.castShadow = true; key.shadow.mapSize.set(1024, 1024); scene.add(key);
@@ -240,3 +240,4 @@ function readingFor(id: ComponentId, sample: DischargeSample): string {
     case "probes": return `${sample.cell_temp_c.toFixed(1)} °C cell · ${sample.ambient_c.toFixed(1)} °C ambient`;
   }
 }
+
