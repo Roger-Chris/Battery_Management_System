@@ -45,6 +45,7 @@ export interface ChargeSimulationSettings {
   initialCellTempC: number;
   ambientC: number;
   requestedCurrentA?: number;
+  chargerSetpointV?: number;
   profile?: CellProfile;
 }
 
@@ -54,11 +55,13 @@ export function runChargeSimulation(settings: ChargeSimulationSettings): ChargeS
   const initialSoc = settings.initialSoc;
   const ambientC = settings.ambientC;
   const requestedCurrentA = Math.min(settings.requestedCurrentA ?? CHARGER_MAX_CURRENT_A, CHARGER_MAX_CURRENT_A);
+  const chargerSetpointV = settings.chargerSetpointV ?? CHARGER_SETPOINT_V;
   const initialCellTempC = settings.initialCellTempC;
   if (!Number.isFinite(durationS) || durationS <= 0) throw new Error("Simulation duration must be greater than zero.");
   if (!Number.isFinite(initialSoc) || initialSoc < 0 || initialSoc > 1) throw new Error("Initial SOC must be between 0 and 1.");
   if (!Number.isFinite(initialCellTempC) || !Number.isFinite(ambientC)) throw new Error("Temperatures must be finite.");
   if (!Number.isFinite(requestedCurrentA) || requestedCurrentA < 0) throw new Error("Charge current must be zero or greater.");
+  if (!Number.isFinite(chargerSetpointV) || chargerSetpointV <= 0 || chargerSetpointV > CHARGER_SETPOINT_V) throw new Error(`Charger setpoint must be between zero and ${CHARGER_SETPOINT_V} V.`);
 
   const adsRate = BOM.ads1115.dataRateSps.value;
   const dtS = 1 / adsRate;
@@ -84,8 +87,8 @@ export function runChargeSimulation(settings: ChargeSimulationSettings): ChargeS
   for (const tick of schedule) {
     const openCellV = cellVoltages(state, 0, profile);
     const openPackV = openCellV.reduce((sum, value) => sum + value, 0);
-    const currentAtVoltageLimit = Math.max(0, (CHARGER_SETPOINT_V - openPackV) / packResistanceOhm);
-    const cvActive = currentAtVoltageLimit < requestedCurrentA || isConstantVoltagePhase(openPackV, CHARGER_SETPOINT_V);
+    const currentAtVoltageLimit = Math.max(0, (chargerSetpointV - openPackV) / packResistanceOhm);
+    const cvActive = currentAtVoltageLimit < requestedCurrentA || isConstantVoltagePhase(openPackV, chargerSetpointV);
     const proposedCurrentA = cvActive
       ? Math.min(requestedCurrentA, currentAtVoltageLimit)
       : requestedCurrentA;
