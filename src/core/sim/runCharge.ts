@@ -46,6 +46,8 @@ export interface ChargeSimulationSettings {
   ambientC: number;
   requestedCurrentA?: number;
   chargerSetpointV?: number;
+  /** Deliberate cutoff-failure fault injection for the clearly labeled visual demo only. */
+  thermalRunawayDemo?: boolean;
   profile?: CellProfile;
 }
 
@@ -102,7 +104,7 @@ export function runChargeSimulation(settings: ChargeSimulationSettings): ChargeS
       cellTempC: measuredCellTempC,
     });
 
-    if (cutoffReason === null && proposedProtection.chargeOverTemp) cutoffReason = "cell temperature limit";
+    if (cutoffReason === null && proposedProtection.chargeOverTemp && !settings.thermalRunawayDemo) cutoffReason = "cell temperature limit";
     if (cutoffReason === null && proposedProtection.overVoltage) cutoffReason = "cell over-voltage";
     if (cutoffReason === null && bms.state === "ov_trip") cutoffReason = "BMS over-voltage";
     if (cutoffReason === null && cvActive && proposedCurrentA <= profile.fields.charge_end_current_A.value) cutoffReason = "charge complete";
@@ -147,7 +149,8 @@ export function runChargeSimulation(settings: ChargeSimulationSettings): ChargeS
     state = stepPack(state, -chargeCurrentA, dtS, profile, spread);
     state.cells = state.cells.map((cell) => ({ ...cell, socFraction: Math.min(1, cell.socFraction) }));
     const chargeHeatW = chargeCurrentA ** 2 * cellResistanceOhm;
-    thermal = thermal.map((cell) => stepThermal(cell, chargeHeatW, ambientC, dtS, profile));
+    const injectedRunawayHeatW = settings.thermalRunawayDemo && thermal[1]!.coreC >= 45 ? 7 : 0;
+    thermal = thermal.map((cell) => stepThermal(cell, chargeHeatW + injectedRunawayHeatW, ambientC, dtS, profile));
     coulombSoc = Math.min(1, coulombSoc + (chargeCurrentA * dtS) / (profile.fields.capacity_nominal_Ah.value * 3600));
   }
 
