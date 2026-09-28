@@ -55,6 +55,23 @@ button { color: inherit; }
   .chart-wrap svg { filter:invert(.88) hue-rotate(180deg); }
   .error-notice { background:#351815; }
 }
+
+/* Clear feedback for applying parameters and watching a fault sequence. */
+.button { transition:transform .14s ease, filter .18s ease, box-shadow .18s ease; }
+.button:hover { filter:brightness(1.08); }
+.button:active { transform:scale(.96); filter:brightness(.92); }
+.button:focus-visible { outline:2px solid #64a9ff; outline-offset:3px; }
+.rig-apply-button { min-width:132px; }
+.rig-apply-button.is-applied { background:#18794e; box-shadow:0 0 0 3px rgba(54,191,125,.19); animation:apply-confirm .44s ease-out; }
+@keyframes apply-confirm { 0% { transform:scale(.94); } 65% { transform:scale(1.035); } 100% { transform:scale(1); } }
+.rig-critical-overlay { position:absolute; z-index:2; left:50%; top:50%; display:grid; gap:7px; width:max-content; max-width:calc(100% - 28px); padding:13px 16px; border:1px solid rgba(255,103,53,.72); border-radius:10px; color:#fff; background:rgba(75,17,10,.9); box-shadow:0 0 30px rgba(255,70,16,.48); text-align:center; transform:translate(-50%,-50%); animation:critical-pulse .85s ease-in-out infinite alternate; }
+.rig-critical-overlay strong { font-size:13px; letter-spacing:.06em; }
+.rig-critical-overlay span { color:#ffd2c5; font-size:11px; }
+@keyframes critical-pulse { from { box-shadow:0 0 22px rgba(255,70,16,.35); } to { box-shadow:0 0 42px rgba(255,70,16,.72); } }
+.rig-chart-progress { stroke-linecap:round; stroke-linejoin:round; }
+.rig-chart-current { stroke:#fff; stroke-width:1.5; vector-effect:non-scaling-stroke; animation:chart-current-pulse .9s ease-in-out infinite alternate; }
+@keyframes chart-current-pulse { from { r:3.5px; } to { r:5.2px; } }
+@media (prefers-reduced-motion:reduce) { .button,.rig-apply-button.is-applied,.rig-critical-overlay { transition:none; animation:none; } }
 .simulation-controls { display:flex; align-items:end; flex-wrap:wrap; gap:14px; margin:16px 0 10px; }
 .simulation-controls label { width:170px; }
 .simulation-controls .field-label { margin-top:0; }
