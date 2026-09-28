@@ -120,14 +120,18 @@ Tests, Signal chain, Compare, Sources and BLE. `RigScene3D.tsx` builds the conce
 layout with Three.js and OrbitControls: four individually visible cells, two ADS1115s, two INA226s,
 three temperature probes, BMS, fuse, charger, relay, divider, DAC, LM358, MOSFET, power resistor,
 heat sink/fan and Pi 5. Users can orbit/zoom, select component meshes or the component list, and
-inspect simulated readings. Play/pause/scrub controls use the provisional T7 trace. Animated
-particles show discharge, sensing, load-control and temperature paths; charging is shown idle. The
-shapes are illustrative, not production CAD, and the demo needs no physical rig or BLE radio.
+inspect simulated readings. Play/pause/scrub controls offer six discharge profiles, an 8-second
+load-pulse train, a CC/CV charge cycle and a warm-cell 45 °C charge-cutoff preview. The charge
+path, relay indicator, battery heat glow and temperature trace animate with scenario telemetry.
+Charge cutoff latches the relay open for the preview. Cell heating parameters remain provisional,
+so these are visual model scenarios rather than validated test procedures. The shapes are
+illustrative, not production CAD, and the demo needs no physical rig or BLE radio.
 
 The interface follows the system-font, responsive layout, dark-mode, reduced motion and
 no-branding rules. Test procedures, parameter provenance and BLE behavior are shown. The Tests
-page includes a runnable T7 preview with CSV export; other scenarios are still marked as not
-generated.
+page includes a runnable T7 preview with CSV export. The 3D scene now visualizes more operating
+conditions, while the remaining T0–T14 procedures still need scenario-specific orchestration and
+validation.
 
 Must follow the Apple HIG rules spelled out in detail in `CLAUDE_CODE_PROMPT.md` (system font
 stack, HIG type scale, 8-point grid, grouped inset lists, Apple system colors with dark mode,
@@ -204,3 +208,4 @@ provisional values to verified BOM data without checking the installed rig.
   keeping it rather than batching multiple phases silently.
 - Every constant added must carry `source`/`ref` per `Parameter<T>` in
   `src/core/config/provenance.ts` — do not add a bare number to any model file.
+
