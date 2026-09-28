@@ -2,10 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { BOM } from "../core/config/bom";
+import type { Parameter } from "../core/config/provenance";
 import { runDischargeSimulation, type DischargeSample } from "../core/sim/runDischarge";
 
 type ComponentId = "pack" | "holder" | "bms" | "charger" | "relay" | "fuse" | "xt60" | "divider" | "adsA" | "adsB" | "inaPack" | "inaLoad" | "dac" | "opAmp" | "breadboard" | "mosfet" | "resistor" | "heatsink" | "fan" | "pi" | "hub" | "adapter" | "probes";
 interface ComponentInfo { id: ComponentId; name: string; kind: string; description: string; location: THREE.Vector3; }
+type ConditionId = "idle" | "light" | "t7" | "ceiling" | "low-soc" | "warm";
+const CONDITIONS: Record<ConditionId, { title: string; currentA: number; initialSoc: number; ambientC: number; summary: string }> = {
+  idle: { title: "No-load baseline", currentA: 0, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, summary: "Checks the model's open-load voltage and sensor baseline." },
+  light: { title: "Light load · 0.4 A", currentA: 0.4, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, summary: "Shows pack sag and telemetry under a light constant load." },
+  t7: { title: "T7 capacity preview · 1.0 A", currentA: 1, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, summary: "The existing provisional T7-style constant-current discharge preview." },
+  ceiling: { title: "Load ceiling · 1.25 A", currentA: 1.25, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, summary: "Runs at the simulator's configured firmware current limit." },
+  "low-soc": { title: "Low starting charge · 25%", currentA: 1, initialSoc: 0.25, ambientC: BOM.thermalDesign.ambientC.value, summary: "Starts with a partly discharged pack to observe voltage and protection readouts." },
+  warm: { title: "Warm ambient · 45 °C", currentA: 1, initialSoc: 1, ambientC: 45, summary: "Repeats the nominal load with a warmer ambient temperature input." },
+};
+const parameterAt = <T,>(parameter: Parameter<T>, value: T): Parameter<T> => ({ ...parameter, value });
 
 // The supplied top-down drawing uses a 10 mm grid. Its grid spacing is about 30 px.
 const layoutPoint = (px: number, py: number, height = 0) => new THREE.Vector3((px - 850) / 30, height, (600 - py) / 30);
@@ -47,8 +58,9 @@ function labelSprite(text: string): THREE.Sprite {
   sprite.scale.set(5.6, 1.0, 1); sprite.renderOrder = 20; sprite.visible = false; return sprite;
 }
 
-function useTelemetry(samples: DischargeSample[]) {
+function useTelemetry(samples: DischargeSample[], conditionId: ConditionId) {
   const [index, setIndex] = useState(0); const [playing, setPlaying] = useState(false);
+  useEffect(() => { setPlaying(false); setIndex(0); }, [conditionId]);
   useEffect(() => {
     if (!playing || samples.length < 2) return;
     const timer = window.setInterval(() => setIndex((previous) => {
@@ -62,8 +74,16 @@ function useTelemetry(samples: DischargeSample[]) {
 
 export default function RigScene3D() {
   const hostRef = useRef<HTMLDivElement>(null); const telemetryRef = useRef<DischargeSample | null>(null);
-  const result = useMemo(() => runDischargeSimulation({ testId: "T7", durationS: BOM.simulation.demoDurationS, initialSoc: BOM.simulation.initialSoc, dischargeCurrentA: BOM.simulation.dischargeCurrentA, ambientC: BOM.thermalDesign.ambientC }), []);
-  const playback = useTelemetry(result.samples); const [selected, setSelected] = useState<ComponentId>("pack"); const [sceneError, setSceneError] = useState("");
+  const [conditionId, setConditionId] = useState<ConditionId>("t7");
+  const condition = CONDITIONS[conditionId];
+  const result = useMemo(() => runDischargeSimulation({
+    testId: `PREVIEW-${conditionId.toUpperCase()}`,
+    durationS: BOM.simulation.demoDurationS,
+    initialSoc: parameterAt(BOM.simulation.initialSoc, condition.initialSoc),
+    dischargeCurrentA: parameterAt(BOM.simulation.dischargeCurrentA, condition.currentA),
+    ambientC: parameterAt(BOM.thermalDesign.ambientC, condition.ambientC),
+  }), [conditionId, condition]);
+  const playback = useTelemetry(result.samples, conditionId); const [selected, setSelected] = useState<ComponentId>("pack"); const [sceneError, setSceneError] = useState("");
   const sample = playback.sample; const selectedPart = PARTS.find((part) => part.id === selected)!;
   telemetryRef.current = sample;
 
@@ -347,15 +367,22 @@ export default function RigScene3D() {
   const start = () => { if (playback.index >= result.samples.length - 1) playback.setIndex(0); playback.setPlaying(true); };
   const packVoltage = sample.cell_v.reduce((sum, voltage) => sum + voltage, 0);
   return <div className="rig-demo">
-    <div className="rig-demo-intro"><p>A scale-based 3D reconstruction from the supplied bench layout. Play the provisional T7 model to watch power and sensor signals move through the rig.</p><span className="badge">Model-only · no rig required</span></div>
+    <div className="rig-demo-intro"><p>A scale-based 3D reconstruction from the supplied bench layout. Choose a discharge condition to see its readings and signal flow animate through the rig.</p><span className="badge">Model-only · no rig required</span></div>
+    <section className="rig-condition panel" aria-label="Simulation conditions">
+      <label htmlFor="rig-condition-select">Preview condition</label>
+      <select id="rig-condition-select" value={conditionId} onChange={(event) => setConditionId(event.target.value as ConditionId)}>
+        {Object.entries(CONDITIONS).map(([id, item]) => <option key={id} value={id}>{item.title}</option>)}
+      </select>
+      <div className="rig-condition-info"><strong>{condition.currentA.toFixed(2)} A · {condition.initialSoc * 100}% SOC · {condition.ambientC} °C ambient</strong><span>{condition.summary} Each preview uses the same connected discharge model; it is not a completed physical test procedure.</span></div>
+    </section>
     <section className="rig-screen panel">
       <div className="rig-screen-head"><div><strong>4S battery management rig</strong><span>Bench-layout reconstruction · 10 mm scene grid · estimated sizes marked</span></div><div className="rig-screen-actions"><span className="rig-interaction-hint">Drag to orbit · scroll to zoom · select a part</span><button className="rig-view-reset" onClick={() => window.dispatchEvent(new Event("rig-reset-view"))}>Reset view</button></div></div>
       <div className="rig-stage" ref={hostRef} aria-label="Interactive Three.js reconstruction of the battery management rig" role="img"><div className="rig-scene-legend"><span><i className="power-key"/>Pack current</span><span><i className="sense-key"/>I²C data</span><span><i className="control-key"/>Load control</span><span><i className="temp-key"/>Temperature</span><span><i className="charge-key"/>Charge route · idle</span></div>{sceneError && <div className="rig-webgl-error">{sceneError}</div>}<div className="rig-stage-caption">4S1P · DMEGC INR18650-26E · PROVISIONAL MODEL</div></div>
       <div className="rig-telemetry"><div><span>Pack voltage</span><strong>{packVoltage.toFixed(2)} <small>V</small></strong></div><div><span>Discharge current</span><strong>{sample.ina1_current_a.toFixed(2)} <small>A</small></strong></div><div><span>Cell temperature</span><strong>{sample.cell_temp_c.toFixed(1)} <small>°C</small></strong></div><div><span>State of charge</span><strong>{(sample.true_soc * 100).toFixed(1)} <small>%</small></strong></div><div><span>Protection state</span><strong className={sample.bms_state === "normal" ? "rig-state-ok" : "rig-state-trip"}>{sample.software_uv_trip ? "UV cut-off" : sample.bms_state}</strong></div></div>
-      <div className="rig-playback"><div className="rig-playback-controls"><button className="button primary" onClick={playback.playing ? () => playback.setPlaying(false) : start}>{playback.playing ? "Pause" : playback.index >= result.samples.length - 1 ? "Replay T7" : "Play T7"}</button><button className="button secondary" onClick={() => { playback.setPlaying(false); playback.setIndex(0); }}>Reset</button><span>Time <strong>{sample.timestamp_s.toFixed(0)} s</strong> / {result.durationS} s</span></div><input aria-label="Simulation time" type="range" min="0" max={result.samples.length - 1} value={playback.index} onChange={(event) => { playback.setPlaying(false); playback.setIndex(Number(event.target.value)); }} /><p>Red: pack current · Blue/yellow: I²C bus · Green: DAC control · Purple: relay · Grey: temperature leads</p></div>
+      <div className="rig-playback"><div className="rig-playback-controls"><button className="button primary" onClick={playback.playing ? () => playback.setPlaying(false) : start}>{playback.playing ? "Pause" : playback.index >= result.samples.length - 1 ? "Replay preview" : "Play preview"}</button><button className="button secondary" onClick={() => { playback.setPlaying(false); playback.setIndex(0); }}>Reset</button><span>Time <strong>{sample.timestamp_s.toFixed(0)} s</strong> / {result.durationS} s</span></div><input aria-label="Simulation time" type="range" min="0" max={result.samples.length - 1} value={playback.index} onChange={(event) => { playback.setPlaying(false); playback.setIndex(Number(event.target.value)); }} /><p>Red: pack current · Blue/yellow: I²C bus · Green: load control · Purple: relay · Grey: temperature leads</p></div>
     </section>
     <div className="rig-detail-grid"><section className="panel rig-part-panel"><div className="panel-head"><h2>Components</h2><span>{PARTS.length} selectable parts · including four cells and three probes</span></div><div className="rig-part-list">{PARTS.map((part) => <button key={part.id} className={`rig-part-button ${selected === part.id ? "selected" : ""}`} onClick={() => choose(part.id)}><span>{part.name}</span><small>{part.kind}</small></button>)}</div></section><section className="panel rig-part-detail"><span className="eyebrow">Selected component · {selectedPart.kind}</span><h2>{selectedPart.name}</h2><p>{selectedPart.description}</p><div className="rig-part-readout"><span>Current model reading</span><strong>{readingFor(selected, sample)}</strong></div></section></div>
-    <p className="rig-model-note">Reconstructed from the supplied top-down image; the 10 mm grid is used as the layout scale. Dimensions marked estimated and component textures are illustrative because photos and caliper measurements were not included. T7 values remain provisional until compared with the physical build.</p>
+    <p className="rig-model-note">Reconstructed from the supplied top-down image; the 10 mm grid is used as the layout scale. Dimensions marked estimated and component textures are illustrative because photos and caliper measurements were not included. All scenario values remain provisional until compared with measurements from a physical build.</p>
   </div>;
 }
 
@@ -367,7 +394,7 @@ function readingFor(id: ComponentId, sample: DischargeSample): string {
     case "bms": return sample.bms_state === "normal" ? "Monitoring · no BMS trip" : `Protection state · ${sample.bms_state}`;
     case "fuse": return "5 A path · trip behavior not simulated";
     case "charger": return "Idle · discharge scenario";
-    case "relay": return "Charge path · not switching in T7";
+    case "relay": return "Charge path · not switching in discharge previews";
     case "xt60": return "Pack connector · current path shown";
     case "divider": return `Four tap channels · ${sample.tap_v[3].toFixed(2)} V highest tap`;
     case "adsA": return `CH0 ${sample.adc_codes[0]} · CH1 ${sample.adc_codes[1]} counts`;
@@ -375,7 +402,7 @@ function readingFor(id: ComponentId, sample: DischargeSample): string {
     case "inaPack": return `${sample.ina1_current_a.toFixed(3)} A · ${sample.ina1_bus_v.toFixed(2)} V`;
     case "inaLoad": return `${sample.ina2_current_a.toFixed(3)} A · ${sample.ina2_bus_v.toFixed(2)} V`;
     case "hub": return "I²C routing junction · bus timing simplified";
-    case "pi": return `T7 telemetry · ${sample.timestamp_s.toFixed(0)} s`;
+    case "pi": return `Preview telemetry · ${sample.timestamp_s.toFixed(0)} s`;
     case "breadboard": return "ADC · DAC · op-amp · divider circuit";
     case "dac": return `Code ${sample.dac_code} · ${sample.requested_current_a.toFixed(2)} A requested`;
     case "opAmp": return "Load control active · analog response simplified";
