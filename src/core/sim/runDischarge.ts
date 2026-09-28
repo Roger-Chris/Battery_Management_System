@@ -30,6 +30,8 @@ export interface DischargeSimulationSettings {
   initialSoc: Parameter<number>;
   dischargeCurrentA: Parameter<number>;
   ambientC: Parameter<number>;
+  /** Optional playback current profile, expressed in simulated seconds. */
+  currentProfile?: (timeS: number) => number;
   profile?: typeof DMEGC_INR18650_26E;
 }
 
@@ -68,7 +70,7 @@ export interface DischargeSimulationResult {
 
 const zeroThermal = (ambientC: number, count: number): ThermalState[] => Array.from({ length: count }, () => initialThermalState(ambientC));
 
-function sensorSnapshot(
+export function sensorSnapshot(
   state: ReturnType<typeof initialPackState>,
   currentA: number,
   thermal: ThermalState[],
@@ -125,8 +127,8 @@ function sensorSnapshot(
   };
 }
 
-function currentAt(settings: DischargeSimulationSettings): number {
-  return settings.dischargeCurrentA.value;
+function currentAt(settings: DischargeSimulationSettings, timeS = 0): number {
+  return settings.currentProfile?.(timeS) ?? settings.dischargeCurrentA.value;
 }
 
 export function runDischargeSimulation(settings: DischargeSimulationSettings): DischargeSimulationResult {
@@ -164,10 +166,12 @@ export function runDischargeSimulation(settings: DischargeSimulationSettings): D
   const cellResistanceOhm = profile.fields.r0_ohm.value + profile.fields.rc_pairs.value.reduce((sum, branch) => sum + branch.R_ohm, 0);
 
   for (const tick of schedule) {
+    const requestedCurrentA = currentAt(settings, tick.tS);
+    if (!Number.isFinite(requestedCurrentA) || requestedCurrentA < 0) throw new Error("Discharge current profile must return a finite value of zero or greater.");
     const preLoadCellV = cellVoltages(state, measuredCurrentA, profile);
     const preLoadPackV = preLoadCellV.reduce((sum, value) => sum + value, 0);
     const maxCode = 2 ** BOM.load.dacBits.value - 1;
-    const dacCode = Math.min(maxCode, Math.round(requestedA / dacLsbA()));
+    const dacCode = Math.min(maxCode, Math.round(requestedCurrentA / dacLsbA()));
     const desiredCurrent = commandedCurrentA(dacCode);
     let load = loadState(dacCode, preLoadPackV);
     let cellV = cellVoltages(state, load.currentA, profile);
@@ -239,3 +243,4 @@ export function dischargeSimulationCsv(result: DischargeSimulationResult): strin
   }
   return lines.join("\n");
 }
+
