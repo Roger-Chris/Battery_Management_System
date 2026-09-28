@@ -30,6 +30,8 @@ export interface DischargeSimulationSettings {
   initialSoc: Parameter<number>;
   dischargeCurrentA: Parameter<number>;
   ambientC: Parameter<number>;
+  /** Initial two-node cell temperature; defaults to ambient. */
+  initialCellTempC?: Parameter<number>;
   /** Optional playback current profile, expressed in simulated seconds. */
   currentProfile?: (timeS: number) => number;
   profile?: typeof DMEGC_INR18650_26E;
@@ -50,6 +52,7 @@ export interface DischargeSample {
   cell_v_low: [number, number, number, number];
   cell_v_high: [number, number, number, number];
   cell_temp_c: number;
+  cell_core_temp_c: number;
   ambient_c: number;
   true_soc: number;
   coulomb_soc: number;
@@ -68,7 +71,7 @@ export interface DischargeSimulationResult {
   warnings: string[];
 }
 
-const zeroThermal = (ambientC: number, count: number): ThermalState[] => Array.from({ length: count }, () => initialThermalState(ambientC));
+const zeroThermal = (ambientC: number, count: number, initialCellTempC = ambientC): ThermalState[] => Array.from({ length: count }, () => initialThermalState(initialCellTempC));
 
 export function sensorSnapshot(
   state: ReturnType<typeof initialPackState>,
@@ -118,6 +121,7 @@ export function sensorSnapshot(
     cell_v_low: cellLow,
     cell_v_high: cellHigh,
     cell_temp_c: cellTemp,
+    cell_core_temp_c: thermal[1]!.coreC,
     ambient_c: codeToTemperature(temperatureToCode(ambientC), 12),
     true_soc: soc,
     coulomb_soc: coulombSoc,
@@ -137,10 +141,12 @@ export function runDischargeSimulation(settings: DischargeSimulationSettings): D
   const initialSoc = settings.initialSoc.value;
   const requestedA = currentAt(settings);
   const ambientC = settings.ambientC.value;
+  const initialCellTempC = settings.initialCellTempC?.value ?? ambientC;
   if (!Number.isFinite(durationS) || durationS <= 0) throw new Error("Simulation duration must be greater than zero.");
   if (!Number.isFinite(initialSoc) || initialSoc < 0 || initialSoc > 1) throw new Error("Initial SOC must be between 0 and 1.");
   if (!Number.isFinite(requestedA) || requestedA < 0) throw new Error("Discharge current must be zero or greater.");
   if (!Number.isFinite(ambientC)) throw new Error("Ambient temperature must be finite.");
+  if (!Number.isFinite(initialCellTempC)) throw new Error("Initial cell temperature must be finite.");
 
   const profileIsProvisional = isCellProfileProvisional(profile);
   const adsRate = BOM.ads1115.dataRateSps.value;
@@ -156,7 +162,7 @@ export function runDischargeSimulation(settings: DischargeSimulationSettings): D
   });
 
   let state = initialPackState(profile, initialSoc, BOM.cell.seriesCount.value);
-  let thermal = zeroThermal(ambientC, state.cells.length);
+  let thermal = zeroThermal(ambientC, state.cells.length, initialCellTempC);
   const spread = defaultSpread(state.cells.length);
   let coulombSoc = initialSoc;
   let bms = initialBmsState();
@@ -186,7 +192,7 @@ export function runDischargeSimulation(settings: DischargeSimulationSettings): D
     const instant = sensorSnapshot(state, load.currentA, thermal, ambientC, initialSoc, coulombSoc, settings.testId, desiredCurrent, bms.state, uvTrip, profile);
     if (tick.dueSensors.includes("ads1115_scan")) lastSample = { ...lastSample, adc_codes: instant.adc_codes, tap_v: instant.tap_v, cell_v: instant.cell_v, cell_v_low: instant.cell_v_low, cell_v_high: instant.cell_v_high };
     if (tick.dueSensors.includes("ina226")) lastSample = { ...lastSample, ina1_current_a: instant.ina1_current_a, ina1_bus_v: instant.ina1_bus_v, ina2_current_a: instant.ina2_current_a, ina2_bus_v: instant.ina2_bus_v };
-    if (tick.dueSensors.includes("ds18b20")) lastSample = { ...lastSample, cell_temp_c: instant.cell_temp_c, ambient_c: instant.ambient_c };
+    if (tick.dueSensors.includes("ds18b20")) lastSample = { ...lastSample, cell_temp_c: instant.cell_temp_c, cell_core_temp_c: instant.cell_core_temp_c, ambient_c: instant.ambient_c };
     if (tick.dueSensors.includes("trace")) {
       const trueSoc = state.cells.reduce((sum, cell) => sum + cell.socFraction, 0) / state.cells.length;
       const output = { ...lastSample, timestamp_s: tick.tS, dac_code: load.currentA === 0 ? 0 : dacCode, requested_current_a: desiredCurrent, true_soc: trueSoc, coulomb_soc: coulombSoc, bms_state: bms.state, software_uv_trip: uvTrip };
