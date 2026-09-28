@@ -8,7 +8,7 @@ import { runDischargeSimulation, type DischargeSample } from "../core/sim/runDis
 
 type ComponentId = "pack" | "holder" | "bms" | "charger" | "relay" | "fuse" | "xt60" | "divider" | "adsA" | "adsB" | "inaPack" | "inaLoad" | "dac" | "opAmp" | "breadboard" | "mosfet" | "resistor" | "heatsink" | "fan" | "pi" | "hub" | "adapter" | "probes";
 interface ComponentInfo { id: ComponentId; name: string; kind: string; description: string; location: THREE.Vector3; }
-type ConditionId = "idle" | "light" | "t7" | "ceiling" | "low-soc" | "warm" | "pulse" | "charge" | "charge-hot" | "runaway";
+type ConditionId = "idle" | "light" | "t7" | "ceiling" | "low-soc" | "warm" | "pulse" | "charge" | "charge-hot" | "runaway" | "runaway-extended";
 interface PreviewCondition { title: string; summary: string; mode: "discharge" | "charge"; currentA: number; initialSoc: number; ambientC: number; durationS: number; initialCellTempC?: number; thermalRunawayDemo?: boolean; }
 interface PreviewControls { currentA: number; initialSoc: number; ambientC: number; initialCellTempC: number; chargerSetpointV: number; }
 const controlsFor = (condition: PreviewCondition): PreviewControls => ({ currentA: condition.currentA, initialSoc: condition.initialSoc, ambientC: condition.ambientC, initialCellTempC: condition.initialCellTempC ?? condition.ambientC, chargerSetpointV: 16.8 });
@@ -22,8 +22,10 @@ const CONDITIONS: Record<ConditionId, PreviewCondition> = {
   pulse: { title: "Load pulse train · 0.4 ↔ 1.25 A", mode: "discharge", currentA: 1.25, initialSoc: 0.8, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Steps the electronic load every 8 seconds to show voltage sag and recovery." },
   charge: { title: "Charge cycle · CC to CV taper", mode: "charge", currentA: 2, initialSoc: 0.65, ambientC: 25, initialCellTempC: 25, durationS: 2400, summary: "Runs the charger model from constant-current charging into a voltage-limited taper." },
   "charge-hot": { title: "Warm-cell charge · 45 °C cutoff", mode: "charge", currentA: 2, initialSoc: 0.65, ambientC: 44, initialCellTempC: 44, durationS: 600, summary: "A warm-start cell heats under charge; the software limit opens the charge relay at 45 °C." },
-  runaway: { title: "Cutoff failure · thermal runaway visual", mode: "charge", currentA: 2, initialSoc: 0.65, ambientC: 25, initialCellTempC: 49, durationS: 120, thermalRunawayDemo: true, summary: "An explicitly fault-injected demo bypasses the 45 °C cutoff and adds runaway heat to demonstrate the fire response." },
+  runaway: { title: "Cutoff failure · thermal runaway visual", mode: "charge", currentA: 2, initialSoc: 0.65, ambientC: 25, initialCellTempC: 49, durationS: 120, thermalRunawayDemo: true, summary: "A short, explicitly fault-injected sequence raises cell temperature into the visual fire response." },
+  "runaway-extended": { title: "Extended thermal runaway · 10 min", mode: "charge", currentA: 2, initialSoc: 0.65, ambientC: 25, initialCellTempC: 49, durationS: 600, thermalRunawayDemo: true, summary: "A 10-minute fault-injected playback shows temperature rise, ignition, smoke and sustained flames alongside the live telemetry." },
 };
+const FIRE_IGNITION_TEMP_C = 55;
 const parameterAt = <T,>(parameter: Parameter<T>, value: T): Parameter<T> => ({ ...parameter, value });
 type DischargeRigSample = DischargeSample & { mode: "discharge"; charge_current_a: 0; charge_relay_closed: false; charger_phase: "idle"; charge_cutoff_reason: null; cell_core_temp_c: number };
 type RigSample = DischargeRigSample | ChargeSimulationSample;
@@ -91,6 +93,7 @@ export default function RigScene3D() {
   const [draft, setDraft] = useState<PreviewControls>(() => controlsFor(CONDITIONS.t7));
   const [applied, setApplied] = useState<PreviewControls>(() => controlsFor(CONDITIONS.t7));
   const [applyFeedback, setApplyFeedback] = useState(false);
+  const [autoPlayExtended, setAutoPlayExtended] = useState(false);
   const resetKey = `${conditionId}:${applied.currentA}:${applied.initialSoc}:${applied.ambientC}:${applied.initialCellTempC}:${applied.chargerSetpointV}`;
   const result = useMemo<RigSimulationResult>(() => {
     const testId = `PREVIEW-${conditionId.toUpperCase()}`;
@@ -125,6 +128,22 @@ export default function RigScene3D() {
   const sample = playback.sample;
   telemetryRef.current = sample;
   runawayDemoRef.current = Boolean(condition.thermalRunawayDemo);
+  useEffect(() => {
+    if (!autoPlayExtended) return;
+    playback.setIndex(0);
+    playback.setPlaying(true);
+    setAutoPlayExtended(false);
+  }, [autoPlayExtended, playback.setIndex, playback.setPlaying]);
+
+  const launchExtendedDemo = () => {
+    const nextId: ConditionId = "runaway-extended";
+    const defaults = controlsFor(CONDITIONS[nextId]);
+    playback.setPlaying(false);
+    setConditionId(nextId);
+    setDraft(defaults);
+    setApplied(defaults);
+    setAutoPlayExtended(true);
+  };
 
   useEffect(() => {
     const host = hostRef.current; if (!host) return;
@@ -234,11 +253,11 @@ export default function RigScene3D() {
     const relayLed = new THREE.Mesh(new THREE.SphereGeometry(.17, 14, 10), relayLedMat); relayLed.position.set(1.55, .5, .2); relay.add(relayLed);
     const heatGlow = new THREE.Color(0xf15a24);
     const fireGroup = new THREE.Group(); fireGroup.position.copy(pack.position); fireGroup.visible = false; scene.add(fireGroup);
-    const flameMaterials = [0xff4b12, 0xff8a16, 0xffca46].map((color) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .9, depthWrite: false, side: THREE.DoubleSide }));
+    const flameMaterials = [0xff3b0a, 0xff7612, 0xffc52e].map((color) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
     const flames: THREE.Mesh[] = [];
     for (let i = 0; i < 9; i++) {
-      const flame = new THREE.Mesh(new THREE.ConeGeometry(.25 + (i % 3) * .055, .9 + (i % 4) * .2, 7), flameMaterials[i % flameMaterials.length]!);
-      flame.position.set(-3.1 + (i % 5) * 1.5, 2.2 + (i % 3) * .16, (i % 2 ? 1 : -1) * (1.05 + (i % 3) * .42)); fireGroup.add(flame); flames.push(flame);
+      const flame = new THREE.Mesh(new THREE.ConeGeometry(.38 + (i % 3) * .09, 1.45 + (i % 4) * .28, 8), flameMaterials[i % flameMaterials.length]!);
+      flame.position.set(-3.1 + (i % 5) * 1.5, 2.35 + (i % 3) * .18, (i % 2 ? 1 : -1) * (1.05 + (i % 3) * .42)); fireGroup.add(flame); flames.push(flame);
     }
     const smokeMaterial = new THREE.MeshBasicMaterial({ color: 0x4a4140, transparent: true, opacity: .28, depthWrite: false });
     const smoke: THREE.Mesh[] = [];
@@ -246,7 +265,7 @@ export default function RigScene3D() {
       const puff = new THREE.Mesh(new THREE.SphereGeometry(.28 + (i % 3) * .12, 8, 7), smokeMaterial.clone());
       puff.userData.phase = i / 7; puff.position.set(-2.5 + (i % 4) * 1.35, 3.0, (i % 2 ? .8 : -.8)); fireGroup.add(puff); smoke.push(puff);
     }
-    const fireLight = new THREE.PointLight(0xff551a, 0, 13, 2); fireLight.position.copy(pack.position).add(new THREE.Vector3(0, 3.1, 0)); scene.add(fireLight);
+    const fireLight = new THREE.PointLight(0xff551a, 0, 18, 2); fireLight.position.copy(pack.position).add(new THREE.Vector3(0, 3.6, 0)); scene.add(fireLight);
     const fuse = partGroup("fuse", 486, 728, "5 A ATO FUSE", 2.0);
     box(fuse, "fuse", [3.5, .5, 1.25], [0, .25, 0], materials.black);
     box(fuse, "fuse", [1.5, .3, .82], [0, .62, 0], materials.red);
@@ -387,8 +406,8 @@ export default function RigScene3D() {
       relayLedMat.color.set(live?.charge_relay_closed ? 0x62e69a : live?.charge_cutoff_reason ? 0xff554a : 0x68717b);
       relayLedMat.emissive.set(live?.charge_relay_closed ? 0x1c8c55 : live?.charge_cutoff_reason ? 0xb92722 : 0x17191c);
       const hot = temperature > 45;
-      const criticalFault = Boolean(runawayDemoRef.current && live?.mode === "charge" && live.cell_core_temp_c >= 60);
-      fireGroup.visible = criticalFault; fireLight.intensity = criticalFault ? 3.2 + Math.sin(time * 19) * 1.0 : 0;
+      const criticalFault = Boolean(runawayDemoRef.current && live?.mode === "charge" && live.cell_core_temp_c >= FIRE_IGNITION_TEMP_C);
+      fireGroup.visible = criticalFault; fireLight.intensity = criticalFault ? 6.2 + Math.sin(time * 19) * 2.0 : 0;
       flames.forEach((flame, index) => { const flicker = .82 + (Math.sin(time * (12 + index) + index * 2.1) + 1) * .18; flame.visible = criticalFault; flame.scale.set(flicker, flicker * (.86 + Math.sin(time * 15 + index) * .13), flicker); flame.rotation.y = Math.sin(time * 8 + index) * .24; });
       smoke.forEach((puff) => { const phase = (time * .22 + (puff.userData.phase as number)) % 1; puff.visible = criticalFault; puff.position.y = 2.9 + phase * 3.4; puff.position.x = -1.6 + Math.sin(time * 1.2 + (puff.userData.phase as number) * 7) * 2.5; (puff.material as THREE.MeshBasicMaterial).opacity = criticalFault ? .3 * (1 - phase) : 0; });
       const resistorBody = groups.get("resistor")?.children.find((child) => child.type === "Mesh") as THREE.Mesh | undefined;
@@ -426,14 +445,14 @@ export default function RigScene3D() {
   const packVoltage = sample.cell_v.reduce((sum, voltage) => sum + voltage, 0);
   const currentLabel = sample.mode === "charge" ? "Charge current" : "Discharge current";
   const currentValue = sample.mode === "charge" ? sample.charge_current_a : sample.ina1_current_a;
-  const operatingStatus = condition.thermalRunawayDemo && sample.cell_core_temp_c >= 60 ? "CRITICAL · THERMAL RUNAWAY" : sample.mode === "charge"
+  const operatingStatus = condition.thermalRunawayDemo && sample.cell_core_temp_c >= FIRE_IGNITION_TEMP_C ? "CRITICAL · THERMAL RUNAWAY" : sample.mode === "charge"
     ? sample.charge_cutoff_reason ? `Cut off · ${sample.charge_cutoff_reason}` : sample.charge_relay_closed ? `Charging · ${sample.charger_phase.toUpperCase()}` : "Charger idle"
     : sample.software_uv_trip ? "UV cut-off" : sample.bms_state;
-  const statusTripped = Boolean(sample.charge_cutoff_reason) || sample.software_uv_trip || sample.bms_state !== "normal" || (condition.thermalRunawayDemo === true && sample.cell_core_temp_c >= 60);
-  const criticalRunaway = Boolean(condition.thermalRunawayDemo && sample.cell_core_temp_c >= 60);
+  const statusTripped = Boolean(sample.charge_cutoff_reason) || sample.software_uv_trip || sample.bms_state !== "normal" || (condition.thermalRunawayDemo === true && sample.cell_core_temp_c >= FIRE_IGNITION_TEMP_C);
+  const criticalRunaway = Boolean(condition.thermalRunawayDemo && sample.cell_core_temp_c >= FIRE_IGNITION_TEMP_C);
   const applySettings = () => { playback.setPlaying(false); setApplied(draft); setApplyFeedback(true); window.setTimeout(() => setApplyFeedback(false), 1100); };
   return <div className="rig-demo">
-    <div className="rig-demo-intro"><p>A scale-based 3D reconstruction from the supplied bench layout. Choose a case to watch charging, temperature, protection and load signals move through the rig.</p><span className="badge">Model-only · no rig required</span></div>
+    <div className="rig-demo-intro"><p>A scale-based 3D reconstruction from the supplied bench layout. Choose a case to watch charging, temperature, protection and load signals move through the rig.</p><div className="rig-demo-actions"><span className="badge">Model-only · no rig required</span><button className="button primary rig-extended-button" onClick={launchExtendedDemo}>▶ Run extended demo</button></div></div>
     <section className="rig-condition panel" aria-label="Simulation conditions">
       <label htmlFor="rig-condition-select">Preview condition</label>
       <select id="rig-condition-select" value={conditionId} onChange={(event) => { const nextId = event.target.value as ConditionId; const defaults = controlsFor(CONDITIONS[nextId]); setConditionId(nextId); setDraft(defaults); setApplied(defaults); }}>
@@ -453,7 +472,7 @@ export default function RigScene3D() {
     </section>
     <section className="rig-screen panel">
       <div className="rig-screen-head"><div><strong>4S battery management rig</strong><span>Bench-layout reconstruction · 10 mm scene grid · estimated sizes marked</span></div><div className="rig-screen-actions"><span className="rig-interaction-hint">Drag to orbit · scroll to zoom · select a part</span><button className="rig-view-reset" onClick={() => window.dispatchEvent(new Event("rig-reset-view"))}>Reset view</button></div></div>
-      <div className="rig-stage" ref={hostRef} aria-label="Interactive Three.js reconstruction of the battery management rig" role="img"><div className="rig-scene-legend"><span><i className="power-key"/>{sample.mode === "charge" ? "Charge power" : "Pack current"}</span><span><i className="sense-key"/>I²C data</span><span><i className="control-key"/>Load control</span><span><i className="temp-key"/>Cell heat</span><span className={sample.charge_relay_closed ? "charge-path-active" : sample.charge_cutoff_reason ? "charge-path-cutoff" : ""}><i className="charge-key"/>Charge route · {sample.charge_relay_closed ? "active" : sample.charge_cutoff_reason ? "cut off" : "idle"}</span></div>{sceneError && <div className="rig-webgl-error">{sceneError}</div>}{criticalRunaway && <div className="rig-critical-overlay" role="alert"><strong>CRITICAL HEAT · THERMAL RUNAWAY</strong><span>Cutoff failure scenario · illustrative fire effect</span></div>}<div className="rig-stage-caption">{criticalRunaway ? "FAULT INJECTED · THERMAL RUNAWAY" : sample.charge_cutoff_reason ? "CHARGE CUTOFF · RELAY OPEN" : sample.mode === "charge" ? `CHARGING · ${sample.charger_phase.toUpperCase()} PHASE` : "4S1P · DMEGC INR18650-26E · PROVISIONAL MODEL"}</div></div>
+      <div className={`rig-stage ${criticalRunaway ? "rig-stage-burning" : ""}`} ref={hostRef} aria-label="Interactive Three.js reconstruction of the battery management rig" role="img"><div className="rig-scene-legend"><span><i className="power-key"/>{sample.mode === "charge" ? "Charge power" : "Pack current"}</span><span><i className="sense-key"/>I²C data</span><span><i className="control-key"/>Load control</span><span><i className="temp-key"/>Cell heat</span><span className={sample.charge_relay_closed ? "charge-path-active" : sample.charge_cutoff_reason ? "charge-path-cutoff" : ""}><i className="charge-key"/>Charge route · {sample.charge_relay_closed ? "active" : sample.charge_cutoff_reason ? "cut off" : "idle"}</span></div>{sceneError && <div className="rig-webgl-error">{sceneError}</div>}{criticalRunaway && <div className="rig-critical-overlay" role="alert"><strong>CRITICAL HEAT · THERMAL RUNAWAY</strong><span>Cutoff failure scenario · illustrative fire effect</span></div>}<div className="rig-stage-caption">{criticalRunaway ? "FAULT INJECTED · THERMAL RUNAWAY" : sample.charge_cutoff_reason ? "CHARGE CUTOFF · RELAY OPEN" : sample.mode === "charge" ? `CHARGING · ${sample.charger_phase.toUpperCase()} PHASE` : "4S1P · DMEGC INR18650-26E · PROVISIONAL MODEL"}</div></div>
       <div className="rig-telemetry"><div><span>Pack voltage</span><strong>{packVoltage.toFixed(2)} <small>V</small></strong></div><div><span>{currentLabel}</span><strong>{currentValue.toFixed(2)} <small>A</small></strong></div><div><span>Cell temperature</span><strong>{sample.cell_temp_c.toFixed(1)} <small>°C</small></strong></div><div><span>State of charge</span><strong>{(sample.true_soc * 100).toFixed(1)} <small>%</small></strong></div><div><span>Charger / protection</span><strong className={statusTripped ? "rig-state-trip" : "rig-state-ok"}>{operatingStatus}</strong></div></div>
       <div className="rig-playback"><div className="rig-playback-controls"><button className="button primary" onClick={playback.playing ? () => playback.setPlaying(false) : start}>{playback.playing ? "Pause" : playback.index >= result.samples.length - 1 ? "Replay preview" : "Play preview"}</button><button className="button secondary" onClick={() => { playback.setPlaying(false); playback.setIndex(0); }}>Reset</button><span>Time <strong>{sample.timestamp_s.toFixed(0)} s</strong> / {result.durationS} s</span></div><input aria-label="Simulation time" type="range" min="0" max={result.samples.length - 1} value={playback.index} onChange={(event) => { playback.setPlaying(false); playback.setIndex(Number(event.target.value)); }} /><p>Red: pack current · Blue/yellow: I²C bus · Green: load control · Purple: relay · Grey: temperature leads</p></div>
     </section>
