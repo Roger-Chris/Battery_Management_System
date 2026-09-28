@@ -10,6 +10,8 @@ type ComponentId = "pack" | "holder" | "bms" | "charger" | "relay" | "fuse" | "x
 interface ComponentInfo { id: ComponentId; name: string; kind: string; description: string; location: THREE.Vector3; }
 type ConditionId = "idle" | "light" | "t7" | "ceiling" | "low-soc" | "warm" | "pulse" | "charge" | "charge-hot";
 interface PreviewCondition { title: string; summary: string; mode: "discharge" | "charge"; currentA: number; initialSoc: number; ambientC: number; durationS: number; initialCellTempC?: number; }
+interface PreviewControls { currentA: number; initialSoc: number; ambientC: number; initialCellTempC: number; chargerSetpointV: number; }
+const controlsFor = (condition: PreviewCondition): PreviewControls => ({ currentA: condition.currentA, initialSoc: condition.initialSoc, ambientC: condition.ambientC, initialCellTempC: condition.initialCellTempC ?? condition.ambientC, chargerSetpointV: 16.8 });
 const CONDITIONS: Record<ConditionId, PreviewCondition> = {
   idle: { title: "No-load baseline", mode: "discharge", currentA: 0, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Checks the model's open-load voltage and sensor baseline." },
   light: { title: "Light load · 0.4 A", mode: "discharge", currentA: 0.4, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Shows pack sag and telemetry under a light constant load." },
@@ -17,7 +19,7 @@ const CONDITIONS: Record<ConditionId, PreviewCondition> = {
   ceiling: { title: "Load ceiling · 1.25 A", mode: "discharge", currentA: 1.25, initialSoc: 1, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Runs at the simulator's configured firmware current limit." },
   "low-soc": { title: "Low starting charge · 25%", mode: "discharge", currentA: 1, initialSoc: 0.25, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Starts with a partly discharged pack to observe voltage and protection readouts." },
   warm: { title: "Warm ambient discharge · 45 °C", mode: "discharge", currentA: 1, initialSoc: 1, ambientC: 45, durationS: 300, summary: "Repeats the nominal load with a warmer ambient temperature input." },
-  pulse: { title: "Load pulse train · 0.4 ↔ 1.25 A", mode: "discharge", currentA: 0.4, initialSoc: 0.8, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Steps the electronic load every 8 seconds to show voltage sag and recovery." },
+  pulse: { title: "Load pulse train · 0.4 ↔ 1.25 A", mode: "discharge", currentA: 1.25, initialSoc: 0.8, ambientC: BOM.thermalDesign.ambientC.value, durationS: 300, summary: "Steps the electronic load every 8 seconds to show voltage sag and recovery." },
   charge: { title: "Charge cycle · CC to CV taper", mode: "charge", currentA: 2, initialSoc: 0.65, ambientC: 25, initialCellTempC: 25, durationS: 2400, summary: "Runs the charger model from constant-current charging into a voltage-limited taper." },
   "charge-hot": { title: "Warm-cell charge · 45 °C cutoff", mode: "charge", currentA: 2, initialSoc: 0.65, ambientC: 44, initialCellTempC: 44, durationS: 600, summary: "A warm-start cell heats under charge; the software limit opens the charge relay at 45 °C." },
 };
@@ -66,9 +68,9 @@ function labelSprite(text: string): THREE.Sprite {
   sprite.scale.set(5.6, 1.0, 1); sprite.renderOrder = 20; sprite.visible = false; return sprite;
 }
 
-function useTelemetry(samples: RigSample[], conditionId: ConditionId) {
+function useTelemetry(samples: RigSample[], resetKey: string) {
   const [index, setIndex] = useState(0); const [playing, setPlaying] = useState(false);
-  useEffect(() => { setPlaying(false); setIndex(0); }, [conditionId]);
+  useEffect(() => { setPlaying(false); setIndex(0); }, [resetKey]);
   useEffect(() => {
     if (!playing || samples.length < 2) return;
     const timer = window.setInterval(() => setIndex((previous) => {
@@ -84,44 +86,40 @@ export default function RigScene3D() {
   const hostRef = useRef<HTMLDivElement>(null); const telemetryRef = useRef<RigSample | null>(null);
   const [conditionId, setConditionId] = useState<ConditionId>("t7");
   const condition = CONDITIONS[conditionId];
+  const [draft, setDraft] = useState<PreviewControls>(() => controlsFor(CONDITIONS.t7));
+  const [applied, setApplied] = useState<PreviewControls>(() => controlsFor(CONDITIONS.t7));
+  const resetKey = `${conditionId}:${applied.currentA}:${applied.initialSoc}:${applied.ambientC}:${applied.initialCellTempC}:${applied.chargerSetpointV}`;
   const result = useMemo<RigSimulationResult>(() => {
     const testId = `PREVIEW-${conditionId.toUpperCase()}`;
     if (condition.mode === "charge") return runChargeSimulation({
       testId,
       durationS: condition.durationS,
-      initialSoc: condition.initialSoc,
-      initialCellTempC: condition.initialCellTempC ?? condition.ambientC,
-      ambientC: condition.ambientC,
-      requestedCurrentA: condition.currentA,
+      initialSoc: applied.initialSoc,
+      initialCellTempC: applied.initialCellTempC,
+      ambientC: applied.ambientC,
+      requestedCurrentA: applied.currentA,
+      chargerSetpointV: applied.chargerSetpointV,
     });
     const discharge = runDischargeSimulation({
       testId,
       durationS: parameterAt(BOM.simulation.demoDurationS, condition.durationS),
-      initialSoc: parameterAt(BOM.simulation.initialSoc, condition.initialSoc),
-      dischargeCurrentA: parameterAt(BOM.simulation.dischargeCurrentA, condition.currentA),
-      ambientC: parameterAt(BOM.thermalDesign.ambientC, condition.ambientC),
-      currentProfile: conditionId === "pulse" ? (timeS) => Math.floor(timeS / 8) % 2 === 0 ? 0.4 : 1.25 : undefined,
+      initialSoc: parameterAt(BOM.simulation.initialSoc, applied.initialSoc),
+      dischargeCurrentA: parameterAt(BOM.simulation.dischargeCurrentA, applied.currentA),
+      ambientC: parameterAt(BOM.thermalDesign.ambientC, applied.ambientC),
+      initialCellTempC: parameterAt(BOM.thermalDesign.ambientC, applied.initialCellTempC),
+      currentProfile: conditionId === "pulse" ? (timeS) => Math.floor(timeS / 8) % 2 === 0 ? applied.currentA * 0.32 : applied.currentA : undefined,
     });
     return {
       ...discharge,
       samples: discharge.samples.map((sample): DischargeRigSample => ({
         ...sample, mode: "discharge", charge_current_a: 0, charge_relay_closed: false,
-        charger_phase: "idle", charge_cutoff_reason: null, cell_core_temp_c: sample.cell_temp_c,
+        charger_phase: "idle", charge_cutoff_reason: null, cell_core_temp_c: sample.cell_core_temp_c,
       })),
     };
-  }, [conditionId, condition]);
-  const playback = useTelemetry(result.samples, conditionId); const [selected, setSelected] = useState<ComponentId>("pack"); const [sceneError, setSceneError] = useState("");
-  const sample = playback.sample; const selectedPart = PARTS.find((part) => part.id === selected)!;
+  }, [conditionId, condition, applied]);
+  const playback = useTelemetry(result.samples, resetKey); const [sceneError, setSceneError] = useState("");
+  const sample = playback.sample;
   telemetryRef.current = sample;
-
-  useEffect(() => {
-    const onPick = (event: Event) => {
-      const id = (event as CustomEvent<ComponentId>).detail;
-      setSelected(id); window.dispatchEvent(new CustomEvent("rig-component-focus", { detail: id }));
-    };
-    window.addEventListener("rig-component-select", onPick);
-    return () => window.removeEventListener("rig-component-select", onPick);
-  }, []);
 
   useEffect(() => {
     const host = hostRef.current; if (!host) return;
@@ -401,7 +399,6 @@ export default function RigScene3D() {
     };
   }, []);
 
-  const choose = (id: ComponentId) => { setSelected(id); window.dispatchEvent(new CustomEvent("rig-component-focus", { detail: id })); };
   const start = () => { if (playback.index >= result.samples.length - 1) playback.setIndex(0); playback.setPlaying(true); };
   const packVoltage = sample.cell_v.reduce((sum, voltage) => sum + voltage, 0);
   const currentLabel = sample.mode === "charge" ? "Charge current" : "Discharge current";
@@ -414,71 +411,60 @@ export default function RigScene3D() {
     <div className="rig-demo-intro"><p>A scale-based 3D reconstruction from the supplied bench layout. Choose a case to watch charging, temperature, protection and load signals move through the rig.</p><span className="badge">Model-only · no rig required</span></div>
     <section className="rig-condition panel" aria-label="Simulation conditions">
       <label htmlFor="rig-condition-select">Preview condition</label>
-      <select id="rig-condition-select" value={conditionId} onChange={(event) => setConditionId(event.target.value as ConditionId)}>
+      <select id="rig-condition-select" value={conditionId} onChange={(event) => { const nextId = event.target.value as ConditionId; const defaults = controlsFor(CONDITIONS[nextId]); setConditionId(nextId); setDraft(defaults); setApplied(defaults); }}>
         {Object.entries(CONDITIONS).map(([id, item]) => <option key={id} value={id}>{item.title}</option>)}
       </select>
-      <div className="rig-condition-info"><strong>{condition.mode === "charge" ? `${condition.currentA.toFixed(1)} A charge · ${condition.initialCellTempC} °C start · ${condition.ambientC} °C ambient` : `${condition.currentA.toFixed(2)} A · ${condition.initialSoc * 100}% SOC · ${condition.ambientC} °C ambient`}</strong><span>{condition.summary} Model-only preview; the cell resistance and thermal response remain provisional.</span></div>
+      <div className="rig-condition-info"><strong>{condition.mode === "charge" ? `${applied.currentA.toFixed(1)} A charge · ${applied.chargerSetpointV.toFixed(1)} V target · ${applied.initialCellTempC.toFixed(0)} °C cell start` : `${applied.currentA.toFixed(2)} A load · ${(applied.initialSoc * 100).toFixed(0)}% SOC · ${applied.initialCellTempC.toFixed(0)} °C cell start`}</strong><span>{condition.summary} · Ambient {applied.ambientC.toFixed(0)} °C. Model parameters are provisional.</span></div>
+    </section>
+    <section className="panel rig-input-panel" aria-label="Simulation input controls">
+      <div className="rig-input-heading"><div><h2>Simulation inputs</h2><p>Adjust the scenario, then apply to regenerate the trace.</p></div><button className="button primary" onClick={() => { playback.setPlaying(false); setApplied(draft); }}>Apply &amp; run</button></div>
+      <div className="rig-input-grid">
+        <RangeControl label={condition.mode === "charge" ? "Charge current" : conditionId === "pulse" ? "Pulse peak current" : "Load current"} value={draft.currentA} min={0} max={condition.mode === "charge" ? 2 : 1.25} step={0.05} unit="A" onChange={(currentA) => setDraft((value) => ({ ...value, currentA }))} />
+        <RangeControl label="Starting state of charge" value={draft.initialSoc * 100} min={10} max={100} step={1} unit="%" onChange={(value) => setDraft((current) => ({ ...current, initialSoc: value / 100 }))} />
+        <RangeControl label="Starting cell temperature" value={draft.initialCellTempC} min={5} max={49} step={1} unit="°C" onChange={(initialCellTempC) => setDraft((value) => ({ ...value, initialCellTempC }))} />
+        <RangeControl label="Ambient temperature" value={draft.ambientC} min={5} max={45} step={1} unit="°C" onChange={(ambientC) => setDraft((value) => ({ ...value, ambientC }))} />
+        {condition.mode === "charge" && <RangeControl label="Charger voltage limit" value={draft.chargerSetpointV} min={15} max={16.8} step={0.1} unit="V" onChange={(chargerSetpointV) => setDraft((value) => ({ ...value, chargerSetpointV }))} />}
+      </div>
     </section>
     <section className="rig-screen panel">
       <div className="rig-screen-head"><div><strong>4S battery management rig</strong><span>Bench-layout reconstruction · 10 mm scene grid · estimated sizes marked</span></div><div className="rig-screen-actions"><span className="rig-interaction-hint">Drag to orbit · scroll to zoom · select a part</span><button className="rig-view-reset" onClick={() => window.dispatchEvent(new Event("rig-reset-view"))}>Reset view</button></div></div>
       <div className="rig-stage" ref={hostRef} aria-label="Interactive Three.js reconstruction of the battery management rig" role="img"><div className="rig-scene-legend"><span><i className="power-key"/>{sample.mode === "charge" ? "Charge power" : "Pack current"}</span><span><i className="sense-key"/>I²C data</span><span><i className="control-key"/>Load control</span><span><i className="temp-key"/>Cell heat</span><span className={sample.charge_relay_closed ? "charge-path-active" : sample.charge_cutoff_reason ? "charge-path-cutoff" : ""}><i className="charge-key"/>Charge route · {sample.charge_relay_closed ? "active" : sample.charge_cutoff_reason ? "cut off" : "idle"}</span></div>{sceneError && <div className="rig-webgl-error">{sceneError}</div>}<div className="rig-stage-caption">{sample.charge_cutoff_reason ? "CHARGE CUTOFF · RELAY OPEN" : sample.mode === "charge" ? `CHARGING · ${sample.charger_phase.toUpperCase()} PHASE` : "4S1P · DMEGC INR18650-26E · PROVISIONAL MODEL"}</div></div>
       <div className="rig-telemetry"><div><span>Pack voltage</span><strong>{packVoltage.toFixed(2)} <small>V</small></strong></div><div><span>{currentLabel}</span><strong>{currentValue.toFixed(2)} <small>A</small></strong></div><div><span>Cell temperature</span><strong>{sample.cell_temp_c.toFixed(1)} <small>°C</small></strong></div><div><span>State of charge</span><strong>{(sample.true_soc * 100).toFixed(1)} <small>%</small></strong></div><div><span>Charger / protection</span><strong className={statusTripped ? "rig-state-trip" : "rig-state-ok"}>{operatingStatus}</strong></div></div>
-      <TemperatureTrace samples={result.samples} activeIndex={playback.index} chargeMode={condition.mode === "charge"} />
       <div className="rig-playback"><div className="rig-playback-controls"><button className="button primary" onClick={playback.playing ? () => playback.setPlaying(false) : start}>{playback.playing ? "Pause" : playback.index >= result.samples.length - 1 ? "Replay preview" : "Play preview"}</button><button className="button secondary" onClick={() => { playback.setPlaying(false); playback.setIndex(0); }}>Reset</button><span>Time <strong>{sample.timestamp_s.toFixed(0)} s</strong> / {result.durationS} s</span></div><input aria-label="Simulation time" type="range" min="0" max={result.samples.length - 1} value={playback.index} onChange={(event) => { playback.setPlaying(false); playback.setIndex(Number(event.target.value)); }} /><p>Red: pack current · Blue/yellow: I²C bus · Green: load control · Purple: relay · Grey: temperature leads</p></div>
     </section>
-    <div className="rig-detail-grid"><section className="panel rig-part-panel"><div className="panel-head"><h2>Components</h2><span>{PARTS.length} selectable parts · including four cells and three probes</span></div><div className="rig-part-list">{PARTS.map((part) => <button key={part.id} className={`rig-part-button ${selected === part.id ? "selected" : ""}`} onClick={() => choose(part.id)}><span>{part.name}</span><small>{part.kind}</small></button>)}</div></section><section className="panel rig-part-detail"><span className="eyebrow">Selected component · {selectedPart.kind}</span><h2>{selectedPart.name}</h2><p>{selectedPart.description}</p><div className="rig-part-readout"><span>Current model reading</span><strong>{readingFor(selected, sample)}</strong></div></section></div>
+    <div className="rig-graphs"><TelemetryChart title="Pack voltage" unit="V" samples={result.samples} activeIndex={playback.index} series={[{ name: "Pack", color: "#64a9ff", values: result.samples.map((item) => item.cell_v.reduce((sum, v) => sum + v, 0)) }]} reference={condition.mode === "charge" ? { value: applied.chargerSetpointV, label: "Charge limit" } : undefined} /><TelemetryChart title="Cell voltages" unit="V" samples={result.samples} activeIndex={playback.index} series={[0, 1, 2, 3].map((cell) => ({ name: `Cell ${cell + 1}`, color: ["#64a9ff", "#64d7ad", "#ffb454", "#c49aff"][cell]!, values: result.samples.map((item) => item.cell_v[cell]!) }))} /><TelemetryChart title="Cell tap voltages" unit="V" samples={result.samples} activeIndex={playback.index} series={[0, 1, 2, 3].map((tap) => ({ name: `Tap ${tap + 1}`, color: ["#64a9ff", "#64d7ad", "#ffb454", "#c49aff"][tap]!, values: result.samples.map((item) => item.tap_v[tap]!) }))} /><TelemetryChart title="Current" unit="A" samples={result.samples} activeIndex={playback.index} series={[{ name: "Pack sensor", color: "#ff995d", values: result.samples.map((item) => item.mode === "charge" ? item.charge_current_a : item.ina1_current_a) }, { name: "Load sensor", color: "#64d7ad", values: result.samples.map((item) => item.mode === "charge" ? 0 : item.ina2_current_a) }, { name: "Command", color: "#64a9ff", values: result.samples.map((item) => item.mode === "charge" ? applied.currentA : item.requested_current_a) }]} /><TelemetryChart title="Cell temperature" unit="°C" samples={result.samples} activeIndex={playback.index} series={[{ name: "Surface", color: "#ff995d", values: result.samples.map((item) => item.cell_temp_c) }, { name: "Core", color: "#ffce72", values: result.samples.map((item) => item.cell_core_temp_c) }, { name: "Ambient", color: "#64a9ff", values: result.samples.map((item) => item.ambient_c) }]} reference={condition.mode === "charge" ? { value: 45, label: "Cutoff" } : undefined} /><TelemetryChart title="State of charge" unit="%" samples={result.samples} activeIndex={playback.index} series={[{ name: "Cell model", color: "#64d7ad", values: result.samples.map((item) => item.true_soc * 100) }, { name: "Coulomb count", color: "#64a9ff", values: result.samples.map((item) => item.coulomb_soc * 100) }]} /></div>
     <p className="rig-model-note">The charge and thermal cases use provisional cell resistance and heat-transfer values. The demo latches the relay open when the modeled 45 °C charge limit or cell over-voltage is reached. This is a visualization of software protection behavior, not a safety test or validated charger model.</p>
   </div>;
 }
 
-function TemperatureTrace({ samples, activeIndex, chargeMode }: { samples: RigSample[]; activeIndex: number; chargeMode: boolean }) {
-  const width = 720, height = 62, left = 10, right = 710, top = 5, bottom = 55;
-  const values = samples.map((item) => item.cell_temp_c);
-  let low = Math.floor(Math.min(...values) - 1), high = Math.ceil(Math.max(...values) + 1);
-  if (chargeMode) { low = Math.min(low, 38); high = Math.max(high, 46); }
-  if (high - low < 2) high = low + 2;
-  const y = (value: number) => bottom - ((value - low) / (high - low)) * (bottom - top);
-  const x = (index: number) => left + (index / Math.max(1, samples.length - 1)) * (right - left);
-  const line = values.map((value, index) => `${index ? "L" : "M"}${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(" ");
-  const active = samples[Math.min(activeIndex, samples.length - 1)]!;
-  return <div className="rig-temp-chart">
-    <div className="rig-temp-chart-head"><strong>Battery temperature</strong><span>{active.cell_temp_c.toFixed(1)} °C at {active.timestamp_s.toFixed(0)} s{chargeMode ? " · charge limit 45 °C" : ""}</span></div>
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Battery temperature over simulation time">
-      {[0, .5, 1].map((fraction) => <line key={fraction} x1={left} x2={right} y1={top + fraction * (bottom - top)} y2={top + fraction * (bottom - top)} className="rig-chart-grid" />)}
-      {chargeMode && <><line x1={left} x2={right} y1={y(45)} y2={y(45)} className="rig-chart-limit" /><text x={right - 2} y={y(45) - 3} textAnchor="end" className="rig-chart-limit-label">45 °C cutoff</text></>}
-      <path d={line} className={active.charge_cutoff_reason ? "rig-chart-line rig-chart-tripped" : "rig-chart-line"} />
-      <line x1={x(activeIndex)} x2={x(activeIndex)} y1={top} y2={bottom} className="rig-chart-cursor" />
-      <circle cx={x(activeIndex)} cy={y(active.cell_temp_c)} r="3.5" className="rig-chart-dot" />
-    </svg>
-  </div>;
+function RangeControl({ label, value, min, max, step, unit, onChange }: { label: string; value: number; min: number; max: number; step: number; unit: string; onChange: (value: number) => void }) {
+  return <label className="rig-range-control"><span><strong>{label}</strong><output>{value.toFixed(unit === "V" || unit === "A" ? 2 : 0)} {unit}</output></span><input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} /></label>;
 }
 
-function readingFor(id: ComponentId, sample: RigSample): string {
-  const packV = sample.cell_v.reduce((sum, voltage) => sum + voltage, 0);
-  switch (id) {
-    case "pack": return `${packV.toFixed(2)} V · ${(sample.true_soc * 100).toFixed(1)}% SOC`;
-    case "holder": return "4 cells · series holder · 18 AWG pack leads";
-    case "bms": return sample.bms_state === "normal" ? "Monitoring · no BMS trip" : `Protection state · ${sample.bms_state}`;
-    case "fuse": return "5 A path · trip behavior not simulated";
-    case "charger": return sample.mode === "charge" ? `${sample.charger_phase.toUpperCase()} · ${sample.charge_current_a.toFixed(2)} A` : "Idle · discharge scenario";
-    case "relay": return sample.charge_relay_closed ? "Closed · charge current flowing" : sample.charge_cutoff_reason ? `Open · ${sample.charge_cutoff_reason}` : "Open · no charge current";
-    case "xt60": return "Pack connector · current path shown";
-    case "divider": return `Four tap channels · ${sample.tap_v[3].toFixed(2)} V highest tap`;
-    case "adsA": return `CH0 ${sample.adc_codes[0]} · CH1 ${sample.adc_codes[1]} counts`;
-    case "adsB": return `CH0 ${sample.adc_codes[2]} · CH1 ${sample.adc_codes[3]} counts`;
-    case "inaPack": return `${sample.ina1_current_a.toFixed(3)} A · ${sample.ina1_bus_v.toFixed(2)} V`;
-    case "inaLoad": return `${sample.ina2_current_a.toFixed(3)} A · ${sample.ina2_bus_v.toFixed(2)} V`;
-    case "hub": return "I²C routing junction · bus timing simplified";
-    case "pi": return `Preview telemetry · ${sample.timestamp_s.toFixed(0)} s`;
-    case "breadboard": return "ADC · DAC · op-amp · divider circuit";
-    case "dac": return sample.mode === "charge" ? "Load command 0 · charger path active" : `Code ${sample.dac_code} · ${sample.requested_current_a.toFixed(2)} A requested`;
-    case "opAmp": return "Load control active · analog response simplified";
-    case "heatsink": return `${sample.cell_temp_c.toFixed(1)} °C cell reading · sink transient not modeled`;
-    case "fan": return "12 V supply · fan spins during playback";
-    case "mosfet": return sample.ina1_current_a > 0 ? "Conducting · load active" : "Off · load disconnected";
-    case "resistor": return sample.mode === "charge" ? "Off · electronic load disconnected" : `Dissipating ≈ ${(packV * sample.ina1_current_a).toFixed(1)} W · idealized`;
-    case "adapter": return "12 V fan/control supply · provisional layout";
-    case "probes": return `${sample.cell_temp_c.toFixed(1)} °C cell · ${sample.ambient_c.toFixed(1)} °C ambient`;
-  }
+interface ChartSeries { name: string; color: string; values: number[]; }
+function TelemetryChart({ title, unit, samples, activeIndex, series, reference }: { title: string; unit: string; samples: RigSample[]; activeIndex: number; series: ChartSeries[]; reference?: { value: number; label: string } }) {
+  const width = 420, height = 152, left = 42, right = 410, top = 18, bottom = 119;
+  const values = [...series.flatMap((item) => item.values), ...(reference ? [reference.value] : [])];
+  let low = Math.min(...values), high = Math.max(...values);
+  const padding = Math.max((high - low) * 0.12, unit === "°C" ? 0.5 : 0.02);
+  low -= padding; high += padding;
+  if (unit === "%") { low = Math.max(0, low); high = Math.min(100, high); }
+  const span = high - low || 1;
+  const x = (index: number) => left + (index / Math.max(1, samples.length - 1)) * (right - left);
+  const y = (value: number) => bottom - ((value - low) / span) * (bottom - top);
+  const active = Math.min(activeIndex, samples.length - 1);
+  const tick = (value: number) => unit === "°C" || unit === "%" ? value.toFixed(0) : value.toFixed(2);
+  return <section className="rig-chart-panel" aria-label={`${title} graph`}><div className="rig-chart-heading"><h3>{title}</h3><span>{samples[active]?.timestamp_s.toFixed(0) ?? 0} s</span></div><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} over time, ${unit}`}>
+    {[0, 0.5, 1].map((fraction) => { const value = high - fraction * span; const yy = y(value); return <g key={fraction}><line x1={left} x2={right} y1={yy} y2={yy} className="rig-chart-grid"/><text x={left - 6} y={yy + 4} textAnchor="end" className="rig-chart-axis">{tick(value)}</text></g>; })}
+    {reference && <><line x1={left} x2={right} y1={y(reference.value)} y2={y(reference.value)} className="rig-chart-limit"/><text x={right - 3} y={y(reference.value) - 4} textAnchor="end" className="rig-chart-limit-label">{reference.label} {reference.value.toFixed(1)} {unit}</text></>}
+    {series.map((item) => { const d = item.values.map((value, index) => `${index ? "L" : "M"}${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(" "); const current = item.values[active] ?? item.values[0] ?? 0; return <g key={item.name}><path d={d} fill="none" stroke={item.color} strokeWidth="1.8" vectorEffect="non-scaling-stroke"/><circle cx={x(active)} cy={y(current)} r="3" fill={item.color}/></g>; })}
+    <line x1={x(active)} x2={x(active)} y1={top} y2={bottom} className="rig-chart-cursor"/><text x={left} y={height - 6} className="rig-chart-axis">{samples[0]?.timestamp_s.toFixed(0) ?? 0} s</text><text x={right} y={height - 6} textAnchor="end" className="rig-chart-axis">{samples.at(-1)?.timestamp_s.toFixed(0) ?? 0} s</text>
+  </svg><div className="rig-chart-legend">{series.map((item) => <span key={item.name}><i style={{ background: item.color }}/>{item.name}: {(item.values[active] ?? 0).toFixed(unit === "°C" || unit === "%" ? 1 : 2)} {unit}</span>)}</div></section>;
+}
+
+export function ComponentCatalog() {
+  const [selected, setSelected] = useState<ComponentId>("pack");
+  const part = PARTS.find((item) => item.id === selected)!;
+  return <><p className="lead">Browse the parts reconstructed in the 3D bench layout. Select an item to see its role and design notes.</p><div className="rig-detail-grid"><section className="panel rig-part-panel"><div className="panel-head"><h2>Component list</h2><span>{PARTS.length} items · four cells · three temperature probes</span></div><div className="rig-part-list">{PARTS.map((item) => <button key={item.id} className={`rig-part-button ${selected === item.id ? "selected" : ""}`} aria-pressed={selected === item.id} onClick={() => setSelected(item.id)}><span>{item.name}</span><small>{item.kind}</small></button>)}</div></section><section className="panel rig-part-detail"><span className="eyebrow">Selected component · {part.kind}</span><h2>{part.name}</h2><p>{part.description}</p></section></div><p className="rig-model-note">Physical sizes and some part specifications are estimates from the supplied layout. See the Sources page for values that still need verification.</p></>;
 }
 
