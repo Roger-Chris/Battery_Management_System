@@ -35,7 +35,7 @@ const sourceEntries: Array<{ group: string; name: string } & Parameter<unknown>>
 function Badge({ children = "Provisional" }: { children?: string }) { return <span className="badge">{children}</span>; }
 function Panel({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) { return <section className="panel"><header className="panel-head"><h2>{title}</h2>{action}</header>{children}</section>; }
 function App() {
-  const [page, setPage] = useState<Page>("Overview");
+  const [page, setPage] = useState<Page>("3D demo");
   const [selectedTest, setSelectedTest] = useState("T7");
   const validation = useMemo(() => validateDesign(), []);
   const provisionalCount = sourceEntries.filter((entry) => isProvisional(entry)).length;
@@ -185,3 +185,4 @@ function BleDemo() {
 }
 
 export default App;
+
