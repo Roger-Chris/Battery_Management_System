@@ -1,6 +1,6 @@
 # Battery bench simulation
 
-A browser-based workspace for the design-v1, 4S1P DMEGC INR18650-26E bench rig. It presents the rig, design validation, component signal paths, parameter sources, BLE authentication behavior, a connected T7 discharge-model preview, and tools for comparing bench-log-format CSV traces.
+A browser-based workspace for the design-v1, 4S1P DMEGC INR18650-26E battery-management rig. It presents the component list and signal paths, an interactive Three.js 3D walkthrough, design validation, parameter sources, BLE authentication behavior, a connected T7 discharge-model preview, and tools for comparing bench-log-format CSV traces.
 
 ## Run locally
 
@@ -35,6 +35,12 @@ Open **Compare** and select an expected trace CSV and a second comparison CSV. B
 
 The Tests page can generate a short **provisional T7 discharge preview** (1–900 seconds, up to the 1.25 A firmware load cap) and export it as CSV. It runs without a physical rig: the connected path includes the cell/pack model, electronic load setpoint, divider and ADS1115 sampling, INA226 current measurement, DS18B20 quantization, under-voltage protection, and coulomb counting. The cell profile and resulting trace are simulation estimates with an uncertainty band, not bench measurements. When a rig is built, T8/T9/T12 data can refine the cell OCV, resistance and thermal profile. Other T0–T14 scenarios, charger/relay behavior, fuse transients, heatsink cutoff, and EKF correction are still pending. Review [`docs/COMPONENT_PARAMETER_RESEARCH.md`](docs/COMPONENT_PARAMETER_RESEARCH.md) for modeled values, literature links and assumptions.
 
+## 3D rig walkthrough
+
+Open **3D demo** to see the 4S1P cell pack and component-level rig, including the BMS, fuse, charger, charge relay, cell-tap divider, two ADS1115s, two INA226s, MCP4725 DAC, LM358 stage, IRLZ44N, 10 Ω load resistor, shared fan-cooled heat sink, Raspberry Pi 5, and three DS18B20 probes. Drag to orbit, scroll to zoom, and select a part in the scene or component list to inspect its role and current simulated reading.
+
+Press **Play T7** to animate the provisional discharge simulation. Telemetry readouts advance with the model time, and colored particles show the discharge, sensing, load-control and temperature-data paths. The charger route is shown idle during discharge. Component shapes and layout are illustrative rather than dimensionally accurate CAD. The view does not connect to physical hardware.
+
 For the Compare page, select an expected trace CSV and a second comparison CSV. Both use the column layout in [`data/bench_log_template.csv`](data/bench_log_template.csv), including `timestamp_s`. The page aligns time from each trace's first sample, interpolates expected values at comparison sample times, and reports bias, RMSE, and maximum absolute error for a shared numeric channel. It can export a labeled SVG overlay and results CSV. The comparison source selector labels results as **model-to-measurement** or **model-to-model**. Keep measured inputs separate from model output and preserve the source label in any paper figure.
 
 ## Project layout
@@ -47,7 +53,7 @@ For the Compare page, select an expected trace CSV and a second comparison CSV. 
 | `src/core/firmware/` | Firmware behavior and telemetry row shapes |
 | `src/core/sim/` | Fixed-step schedule and connected provisional T7 discharge preview |
 | `src/core/compare/` | CSV parser, trace alignment, metrics and exports |
-| `src/ui/` | Responsive React interface and design tokens |
+| `src/ui/` | Responsive React interface, design tokens and Three.js 3D rig scene |
 | `tools/` | Python design validator and cell-profile fitter |
 | `docs/` | Hardware specification, bench test plan and firmware port notes |
 

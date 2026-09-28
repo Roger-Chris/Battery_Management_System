@@ -1,6 +1,6 @@
 # Handoff: BMS bench-rig simulation site
 
-Status as of this handoff: **Phases 1–6 implemented; Phase 7 is deployment-ready; first connected simulation slice implemented** (see `CLAUDE_CODE_PROMPT.md` for the
+Status as of this handoff: **Phases 1–6 implemented; Phase 7 is deployment-ready; connected T7 simulation and interactive 3D rig demo implemented** (see `CLAUDE_CODE_PROMPT.md` for the
 full phase plan and all project rules — read that file first, it is the spec this handoff
 summarizes progress against). `CLAUDE.md` has the standing repo rules (provenance, Provisional
 badges, `npm test` + `python tools/validate_design.py` must pass before any commit, framework-free
@@ -115,11 +115,19 @@ Run the build, tests, design validator, and profile fitter self-test before and 
 ## Completed phases and remaining work
 
 ### Phase 5 — UI pages
-`src/App.tsx` and `src/ui/styles.css` implement Overview, Bench, Tests, Signal chain, Compare,
-Sources and BLE. The interface follows the system-font, responsive layout, dark-mode, reduced
-motion and no-branding rules. Test procedures, parameter provenance and BLE behavior are shown.
-The Tests page includes a runnable T7 preview with CSV export; other scenarios are still marked
-as not generated.
+`src/App.tsx`, `src/ui/RigScene3D.tsx` and `src/ui/styles.css` implement Overview, Bench, 3D demo,
+Tests, Signal chain, Compare, Sources and BLE. `RigScene3D.tsx` builds the conceptual component
+layout with Three.js and OrbitControls: four individually visible cells, two ADS1115s, two INA226s,
+three temperature probes, BMS, fuse, charger, relay, divider, DAC, LM358, MOSFET, power resistor,
+heat sink/fan and Pi 5. Users can orbit/zoom, select component meshes or the component list, and
+inspect simulated readings. Play/pause/scrub controls use the provisional T7 trace. Animated
+particles show discharge, sensing, load-control and temperature paths; charging is shown idle. The
+shapes are illustrative, not production CAD, and the demo needs no physical rig or BLE radio.
+
+The interface follows the system-font, responsive layout, dark-mode, reduced motion and
+no-branding rules. Test procedures, parameter provenance and BLE behavior are shown. The Tests
+page includes a runnable T7 preview with CSV export; other scenarios are still marked as not
+generated.
 
 Must follow the Apple HIG rules spelled out in detail in `CLAUDE_CODE_PROMPT.md` (system font
 stack, HIG type scale, 8-point grid, grouped inset lists, Apple system colors with dark mode,
@@ -196,4 +204,3 @@ provisional values to verified BOM data without checking the installed rig.
   keeping it rather than batching multiple phases silently.
 - Every constant added must carry `source`/`ref` per `Parameter<T>` in
   `src/core/config/provenance.ts` — do not add a bare number to any model file.
-
