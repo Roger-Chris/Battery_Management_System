@@ -152,7 +152,7 @@ export default function RigScene3D() {
     catch { setSceneError("This browser could not start WebGL. Try a browser with hardware acceleration enabled."); return; }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6)); renderer.setSize(host.clientWidth, host.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.08;
-    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; host.replaceChildren(renderer.domElement);
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; host.appendChild(renderer.domElement);
     const scene = new THREE.Scene(); scene.background = new THREE.Color("#17191c"); scene.fog = new THREE.Fog("#17191c", 84, 155);
     const target = layoutPoint(825, 625, 0);
     const camera = new THREE.PerspectiveCamera(35, host.clientWidth / host.clientHeight, .1, 250);
