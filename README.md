@@ -37,9 +37,9 @@ The Tests page can generate a short **provisional T7 discharge preview** (1–90
 
 ## 3D rig walkthrough
 
-Open **3D demo** to see the 4S1P cell pack and component-level rig, including the BMS, fuse, charger, charge relay, cell-tap divider, two ADS1115s, two INA226s, MCP4725 DAC, LM358 stage, IRLZ44N, 10 Ω load resistor, shared fan-cooled heat sink, Raspberry Pi 5, and three DS18B20 probes. Drag to orbit, scroll to zoom, and select a part in the scene or component list to inspect its role and current simulated reading.
+Open **3D demo** to see the 4S1P cell pack and 23 selectable parts reconstructed from the supplied top-down bench layout. The scene uses its 10 mm grid for scale, shows separate pink 18650 cells and holder, detailed BMS and Pi boards, breadboard tie points, shunt monitors, the charger/relay/fuse section, and the load/heatsink assembly. Drag to orbit, scroll to zoom, select a part to focus it, and use **Reset view** to return to the full bench.
 
-Press **Play T7** to animate the provisional discharge simulation. Telemetry readouts advance with the model time, and colored particles show the discharge, sensing, load-control and temperature-data paths. The charger route is shown idle during discharge. Component shapes and layout are illustrative rather than dimensionally accurate CAD. The view does not connect to physical hardware.
+Press **Play T7** to animate the provisional discharge simulation. Telemetry readouts advance with model time, while colored particles trace the pack-current, I²C, load-control, relay and temperature leads. The charger route is shown idle during discharge. Dimensions listed in the supplied notes are used where available; estimated footprints and visual details are identified in the scene notes because no part photos or physical measurements were supplied. This reconstruction is not a manufacturing drawing and does not connect to physical hardware. See [`docs/SCENE_REFERENCE_NOTES.md`](docs/SCENE_REFERENCE_NOTES.md) and [`docs/reference-images/`](docs/reference-images/) for the source images and assumptions.
 
 For the Compare page, select an expected trace CSV and a second comparison CSV. Both use the column layout in [`data/bench_log_template.csv`](data/bench_log_template.csv), including `timestamp_s`. The page aligns time from each trace's first sample, interpolates expected values at comparison sample times, and reports bias, RMSE, and maximum absolute error for a shared numeric channel. It can export a labeled SVG overlay and results CSV. The comparison source selector labels results as **model-to-measurement** or **model-to-model**. Keep measured inputs separate from model output and preserve the source label in any paper figure.
 
@@ -79,3 +79,4 @@ npx vercel --prod
 - [`docs/FIRMWARE_PORT_NOTES.md`](docs/FIRMWARE_PORT_NOTES.md): TypeScript-to-Python firmware mapping.
 - [`docs/COMPONENT_PARAMETER_RESEARCH.md`](docs/COMPONENT_PARAMETER_RESEARCH.md): datasheet research, modeled settings and values awaiting bench verification.
 - [`docs/validation_report.md`](docs/validation_report.md): design-v0 and design-v1 validation results.
+
