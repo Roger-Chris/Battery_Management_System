@@ -4,41 +4,47 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { BOM } from "../core/config/bom";
 import { runDischargeSimulation, type DischargeSample } from "../core/sim/runDischarge";
 
-type ComponentId = "pack" | "bms" | "fuse" | "charger" | "relay" | "divider" | "adsA" | "adsB" | "inaPack" | "inaLoad" | "dac" | "opAmp" | "mosfet" | "resistor" | "heatsink" | "pi" | "probes";
-
+type ComponentId = "pack" | "holder" | "bms" | "charger" | "relay" | "fuse" | "xt60" | "divider" | "adsA" | "adsB" | "inaPack" | "inaLoad" | "dac" | "opAmp" | "breadboard" | "mosfet" | "resistor" | "heatsink" | "fan" | "pi" | "hub" | "adapter" | "probes";
 interface ComponentInfo { id: ComponentId; name: string; kind: string; description: string; location: THREE.Vector3; }
 
+// The supplied top-down drawing uses a 10 mm grid. Its grid spacing is about 30 px.
+const layoutPoint = (px: number, py: number, height = 0) => new THREE.Vector3((px - 850) / 30, height, (600 - py) / 30);
+const mm = (value: number) => value / 10;
 const PARTS: ComponentInfo[] = [
-  { id: "pack", name: "4S1P cell pack", kind: "Battery · 4 × DMEGC INR18650-26E", description: "Four series cells provide the simulated pack voltage. Cell capacity, open-circuit curve and resistance are provisional literature-profile inputs.", location: new THREE.Vector3(-6.6, 1, 0) },
-  { id: "bms", name: "4S BMS board", kind: "Protection board · 40 A listing", description: "Monitors the series pack and can disconnect it on cell over-voltage, under-voltage or over-current. Board thresholds remain provisional until the exact board is identified.", location: new THREE.Vector3(-6.5, .72, -2.6) },
-  { id: "fuse", name: "5 A ATO fuse", kind: "Pack protection", description: "Series fuse in the battery path. A Littelfuse 287 replacement candidate is logged as provisional; no fuse-trip behavior is claimed in this discharge demo.", location: new THREE.Vector3(-3.8, .8, 0) },
-  { id: "charger", name: "16.8 V charger", kind: "Charger · 2 A listing", description: "The charger and charge relay are shown in the rig layout. The current T7 animation is a discharge run and does not simulate charger behavior.", location: new THREE.Vector3(-6.5, .8, -4.4) },
-  { id: "relay", name: "Charge relay", kind: "Charge path control", description: "The Pi controls the relay to enable or isolate charging. It is shown in the physical signal layout; its contact state is not switched during this T7 run.", location: new THREE.Vector3(-1.8, .8, 0) },
-  { id: "divider", name: "Cell tap divider ladder", kind: "1 MΩ / 200 kΩ tap network", description: "Scales cumulative cell-tap voltages into the ADC input range. The 3D ladder is conceptual and not a PCB layout.", location: new THREE.Vector3(-3.7, .75, 3.25) },
-  { id: "adsA", name: "ADS1115 · address 0x48", kind: "16-bit tap ADC", description: "Samples the first two tap channels. The 128 SPS rate is the datasheet power-on default used as a provisional timing baseline.", location: new THREE.Vector3(-1.2, .75, 3.25) },
-  { id: "adsB", name: "ADS1115 · address 0x49", kind: "16-bit tap ADC", description: "Samples the remaining tap channels. Address 0x49 follows the design configuration and must be checked against the module straps when the rig is built.", location: new THREE.Vector3(.95, .75, 3.25) },
-  { id: "inaPack", name: "INA226 · pack", kind: "Current and bus voltage", description: "Measures pack current and voltage. One-sample averaging and 1.1 ms conversions are datasheet reset defaults, not verified firmware settings.", location: new THREE.Vector3(-.1, .8, 0) },
-  { id: "inaLoad", name: "INA226 · load", kind: "Load current monitor", description: "Measures the electronic-load branch for current feedback and logging. Its simulated reading follows the T7 discharge trace.", location: new THREE.Vector3(3.25, .8, -.9) },
-  { id: "dac", name: "MCP4725 DAC", kind: "12-bit setpoint output", description: "Converts the Pi's load-current command into an analog setpoint. The address depends on the part variant and board strap; 0x60 is not confirmed for a physical module.", location: new THREE.Vector3(3.05, .75, 3.25) },
-  { id: "opAmp", name: "LM358 control stage", kind: "Gate-drive control", description: "Conditions the DAC signal for the MOSFET load-control loop. The visual wiring is conceptual rather than a circuit-board layout.", location: new THREE.Vector3(5.05, .75, 3.25) },
-  { id: "mosfet", name: "IRLZ44N MOSFET", kind: "Electronic-load switch", description: "Regulates the discharge load under analog control and shares the heat sink with the power resistor. Temperature cutoff is not exercised in this preview.", location: new THREE.Vector3(5.8, 1.55, .15) },
-  { id: "resistor", name: "10 Ω / 50 W resistor", kind: "Power load", description: "Dissipates the pack energy during discharge. The model animates the electronic-load path; enclosure and mounting details are not represented.", location: new THREE.Vector3(5.8, 1.45, -1.55) },
-  { id: "heatsink", name: "Shared fan-cooled heat sink", kind: "MOSFET + resistor cooling", description: "The layout shows the shared heat sink and fan. Installed heat-sink thermal response is unknown and is not part of the current temperature trace.", location: new THREE.Vector3(5.8, .65, -.75) },
-  { id: "pi", name: "Raspberry Pi 5", kind: "Edge control and telemetry", description: "Runs sampling, control, protection, logging and the BLE authentication demo. This browser scene animates the model; it does not connect to a Pi or BLE radio.", location: new THREE.Vector3(7.35, .75, 3.15) },
-  { id: "probes", name: "3 × DS18B20 probes", kind: "Cell, heat sink and spare", description: "One-wire temperature sensors. The cell probe trace is quantized in the demo; waterproof probe lag and the heat-sink response are not modeled yet.", location: new THREE.Vector3(-4.95, 1.65, 1.05) },
+  { id: "pack", name: "Four 18650 cells", kind: "4S1P · DMEGC INR18650-26E", description: "Four distinct pink wrapped 18650 cells. The cell profile drives the provisional discharge readings; the wrap colour and form follow the supplied bench layout.", location: layoutPoint(260, 610) },
+  { id: "holder", name: "4S cell holder", kind: "ABS holder · estimated 86 × 78 mm", description: "Black four-cell holder with spring contacts and red/black pack leads. Holder dimensions are estimates from the supplied component notes.", location: layoutPoint(260, 610) },
+  { id: "bms", name: "4S 40 A BMS", kind: "Blue protection board · size estimated", description: "Protection board with visible MOSFET packages and balance connector. The exact board and protection thresholds still need physical verification.", location: layoutPoint(516, 570) },
+  { id: "charger", name: "16.8 V / 2 A charger", kind: "Charger brick · estimated placement", description: "Charger brick shown in the reference layout. Charging behavior is not part of the current T7 discharge playback.", location: layoutPoint(258, 239) },
+  { id: "relay", name: "5 V / 10 A relay", kind: "Charge path", description: "Relay sits between the charger and battery charge path. It remains idle in the current discharge scenario.", location: layoutPoint(570, 215) },
+  { id: "fuse", name: "5 A ATO fuse holder", kind: "Pack protection", description: "Replaceable ATO fuse holder on the battery positive path. Fuse trip behavior is not simulated.", location: layoutPoint(486, 728) },
+  { id: "xt60", name: "XT60 connector", kind: "Pack connector", description: "Pack connector shown beside the fuse holder, following the reference layout.", location: layoutPoint(615, 727) },
+  { id: "divider", name: "Cell tap resistor ladder", kind: "1 MΩ / 200 kΩ network", description: "Resistor ladder scales the four cell taps for voltage measurement. The board and resistor locations are illustrative.", location: layoutPoint(735, 775) },
+  { id: "adsA", name: "ADS1115 · 0x48", kind: "Cell tap ADC · channels 1–2", description: "First ADC module samples the first two cell taps. Its physical address straps still need checking.", location: layoutPoint(729, 716) },
+  { id: "adsB", name: "ADS1115 · 0x49", kind: "Cell tap ADC · channels 3–4", description: "Second ADC module samples the remaining taps. Its physical address straps still need checking.", location: layoutPoint(824, 716) },
+  { id: "inaPack", name: "INA226 · pack", kind: "0x40 · pack current and voltage", description: "Pack-side current monitor, including the visible precision shunt. Module dimensions are estimated from the reference drawing.", location: layoutPoint(725, 500) },
+  { id: "inaLoad", name: "INA226 · load", kind: "0x41 · load current", description: "Load-side current monitor with a visible shunt. Its simulated current follows the T7 discharge trace.", location: layoutPoint(982, 500) },
+  { id: "hub", name: "I²C hub", kind: "Sensor bus junction", description: "Central I²C junction shown in the supplied wiring plan. It represents the bus routing, not an additional confirmed part number.", location: layoutPoint(1080, 290) },
+  { id: "pi", name: "Raspberry Pi 5", kind: "85 × 56 mm · active cooler", description: "Edge controller with GPIO header, active cooler, USB and Ethernet ports. The scene does not connect to a physical Pi.", location: layoutPoint(1340, 280) },
+  { id: "breadboard", name: "Breadboard", kind: "165 × 55 mm", description: "Solderless breadboard carrying the ADC modules, DAC, op-amp and divider components, with a visible tie-point field.", location: layoutPoint(922, 760) },
+  { id: "dac", name: "MCP4725 DAC", kind: "12-bit load command", description: "Converts the Pi's command to an analog setpoint for the electronic-load control loop.", location: layoutPoint(922, 720) },
+  { id: "opAmp", name: "LM358 control stage", kind: "Breadboard circuit", description: "The op-amp conditions the DAC signal for the MOSFET gate. The circuit geometry is illustrative.", location: layoutPoint(990, 720) },
+  { id: "heatsink", name: "Load heatsink", kind: "Extruded aluminium · dimensions estimated", description: "Shared cooling plate beneath the load MOSFET and power resistor. Its thermal response is not characterized yet.", location: layoutPoint(1360, 695) },
+  { id: "fan", name: "12 V cooling fan", kind: "Fan · animated with scene time", description: "Fan is shown beside the heatsink as in the reference layout. It spins during the running demo; airflow is not simulated.", location: layoutPoint(1360, 950) },
+  { id: "mosfet", name: "IRLZ44N MOSFET", kind: "TO-220 · electronic load", description: "The MOSFET switches the electronic load and shares the heatsink. Gate-control and cutoff behavior are simplified for this preview.", location: layoutPoint(1290, 655) },
+  { id: "resistor", name: "10 Ω / 50 W resistor", kind: "Aluminium-housed · estimated 49 × 28 mm", description: "Gold aluminium-housed power resistor bolted to the heatsink, as shown in the supplied reference. Confirm the actual package on the physical part.", location: layoutPoint(1370, 690) },
+  { id: "adapter", name: "12 V adapter", kind: "Fan and control supply", description: "Separate 12 V adapter for the fan and LM358 supply, matching the supplied wiring layout.", location: layoutPoint(1050, 1050) },
+  { id: "probes", name: "3 × DS18B20 probes", kind: "Cell · heatsink · ambient", description: "One probe sits on cell 2 under a small Kapton patch, one is on the heatsink, and one hangs free for ambient temperature.", location: layoutPoint(245, 590) },
 ];
 
-const CELL_COLORS = ["#54a7ff", "#54a7ff", "#54a7ff", "#54a7ff"];
-
 function labelSprite(text: string): THREE.Sprite {
-  const canvas = document.createElement("canvas"); canvas.width = 640; canvas.height = 120;
+  const canvas = document.createElement("canvas"); canvas.width = 720; canvas.height = 128;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "rgba(17, 20, 26, 0.88)"; ctx.beginPath(); ctx.roundRect(8, 8, 624, 104, 22); ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,.13)"; ctx.lineWidth = 2; ctx.stroke();
-  ctx.font = "600 42px system-ui, sans-serif"; ctx.fillStyle = "#f7f8fa"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(text, 320, 60, 590);
+  ctx.fillStyle = "rgba(17, 20, 26, 0.94)"; ctx.beginPath(); ctx.roundRect(8, 8, 704, 112, 22); ctx.fill();
+  ctx.strokeStyle = "rgba(90, 160, 255, .8)"; ctx.lineWidth = 3; ctx.stroke();
+  ctx.font = "600 42px system-ui, sans-serif"; ctx.fillStyle = "#f7f8fa"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(text, 360, 64, 670);
   const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
-  sprite.scale.set(2.45, .58, 1); return sprite;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, depthTest: false }));
+  sprite.scale.set(5.6, 1.0, 1); sprite.renderOrder = 20; sprite.visible = false; return sprite;
 }
 
 function useTelemetry(samples: DischargeSample[]) {
@@ -62,7 +68,10 @@ export default function RigScene3D() {
   telemetryRef.current = sample;
 
   useEffect(() => {
-    const onPick = (event: Event) => setSelected((event as CustomEvent<ComponentId>).detail);
+    const onPick = (event: Event) => {
+      const id = (event as CustomEvent<ComponentId>).detail;
+      setSelected(id); window.dispatchEvent(new CustomEvent("rig-component-focus", { detail: id }));
+    };
     window.addEventListener("rig-component-select", onPick);
     return () => window.removeEventListener("rig-component-select", onPick);
   }, []);
@@ -70,151 +79,283 @@ export default function RigScene3D() {
   useEffect(() => {
     const host = hostRef.current; if (!host) return;
     let renderer: THREE.WebGLRenderer;
-    try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power" }); }
+    try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "low-power" }); }
     catch { setSceneError("This browser could not start WebGL. Try a browser with hardware acceleration enabled."); return; }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75)); renderer.setSize(host.clientWidth, host.clientHeight); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    host.replaceChildren(renderer.domElement);
-    const scene = new THREE.Scene(); scene.background = new THREE.Color("#11151b"); scene.fog = new THREE.Fog("#11151b", 25, 48);
-    const camera = new THREE.PerspectiveCamera(38, host.clientWidth / host.clientHeight, .1, 100); camera.position.set(16, 13.5, 18);
-    const controls = new OrbitControls(camera, renderer.domElement); controls.target.set(0, .6, 0); controls.enableDamping = true; controls.dampingFactor = .055; controls.minDistance = 8; controls.maxDistance = 34; controls.maxPolarAngle = Math.PI * .49;
-    scene.add(new THREE.HemisphereLight(0xdbeaff, 0x17202d, 2.0));
-    const key = new THREE.DirectionalLight(0xffffff, 3.0); key.position.set(-5, 12, 8); key.castShadow = true; key.shadow.mapSize.set(1024, 1024); scene.add(key);
-    const rim = new THREE.DirectionalLight(0x58a6ff, 2.1); rim.position.set(8, 8, -7); scene.add(rim);
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(18.4, .28, 12.2), new THREE.MeshStandardMaterial({ color: 0x27313e, roughness: .72, metalness: .18 })); floor.position.y = -.2; floor.receiveShadow = true; scene.add(floor);
-    const board = new THREE.Mesh(new THREE.BoxGeometry(17.7, .08, 11.5), new THREE.MeshStandardMaterial({ color: 0x17251f, roughness: .88, metalness: .06 })); board.position.y = -.025; board.receiveShadow = true; scene.add(board);
-    const grid = new THREE.GridHelper(17.6, 28, 0x385244, 0x30463b); grid.position.set(0, .03, 0); (grid.material as THREE.Material).transparent = true; (grid.material as THREE.Material).opacity = .34; scene.add(grid);
-
-    const rayTargets: THREE.Object3D[] = [];
-    const mat = (color: THREE.ColorRepresentation, roughness = .55, metalness = .12, emissive?: THREE.ColorRepresentation) => new THREE.MeshStandardMaterial({ color, roughness, metalness, ...(emissive ? { emissive, emissiveIntensity: .18 } : {}) });
-    const addMesh = (group: THREE.Group, geometry: THREE.BufferGeometry, material: THREE.Material, position: THREE.Vector3, scale?: THREE.Vector3) => {
-      const mesh = new THREE.Mesh(geometry, material); mesh.position.copy(position); if (scale) mesh.scale.copy(scale); mesh.castShadow = true; mesh.receiveShadow = true; mesh.userData.componentId = group.userData.componentId; group.add(mesh); rayTargets.push(mesh); return mesh;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6)); renderer.setSize(host.clientWidth, host.clientHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.08;
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; host.replaceChildren(renderer.domElement);
+    const scene = new THREE.Scene(); scene.background = new THREE.Color("#17191c"); scene.fog = new THREE.Fog("#17191c", 84, 155);
+    const target = layoutPoint(825, 625, 0);
+    const camera = new THREE.PerspectiveCamera(35, host.clientWidth / host.clientHeight, .1, 250);
+    const cameraDirection = new THREE.Vector3(.52, .94, .64).normalize();
+    const fitCamera = () => {
+      const aspect = Math.max(host.clientWidth / Math.max(host.clientHeight, 1), .5);
+      const vertical = 35 * Math.PI / 180, horizontal = 2 * Math.atan(Math.tan(vertical / 2) * aspect);
+      const projectedWidth = 55 * .82 + 35 * .57;
+      const projectedDepth = 34;
+      const distance = Math.max(projectedWidth / (2 * Math.tan(horizontal / 2)), projectedDepth / (2 * Math.tan(vertical / 2))) * 1.12;
+      camera.position.copy(target).addScaledVector(cameraDirection, distance); camera.lookAt(target); camera.updateProjectionMatrix();
     };
-    const makeBoard = (id: ComponentId, center: THREE.Vector3, size: THREE.Vector3, color = 0x187453, title?: string) => {
-      const group = new THREE.Group(); group.position.copy(center); group.userData.componentId = id;
-      addMesh(group, new THREE.BoxGeometry(size.x, .16, size.z), mat(color, .68, .12), new THREE.Vector3(0, 0, 0));
-      const chip = addMesh(group, new THREE.BoxGeometry(size.x * .34, .15, size.z * .34), mat(0x18202a, .36, .34), new THREE.Vector3(0, .16, 0)); chip.userData.componentId = id;
-      const pinMat = mat(0xd6b567, .28, .78);
-      for (let i = 0; i < 4; i++) { const x = -size.x * .37 + i * size.x * .24; for (const z of [-size.z * .43, size.z * .43]) addMesh(group, new THREE.CylinderGeometry(.035, .035, .3, 8), pinMat, new THREE.Vector3(x, -.13, z)); }
-      if (title) { const label = labelSprite(title); label.position.set(0, .75, 0); group.add(label); }
-      scene.add(group); return group;
+    fitCamera();
+    const controls = new OrbitControls(camera, renderer.domElement); controls.target.copy(target); controls.enableDamping = true; controls.dampingFactor = .075; controls.minDistance = 31; controls.maxDistance = 112; controls.maxPolarAngle = Math.PI * .48;
+    scene.add(new THREE.HemisphereLight(0xe6edff, 0x29241f, 2.0));
+    const key = new THREE.DirectionalLight(0xfff4df, 3.1); key.position.set(-24, 42, 32); key.castShadow = true; key.shadow.mapSize.set(2048, 2048); key.shadow.camera.left = -38; key.shadow.camera.right = 38; key.shadow.camera.top = 30; key.shadow.camera.bottom = -30; key.shadow.bias = -.00025; scene.add(key);
+    const fill = new THREE.DirectionalLight(0xb4d6ff, 1.5); fill.position.set(36, 24, -24); scene.add(fill);
+    const rim = new THREE.PointLight(0xffaa69, 22, 52); rim.position.set(14, 12, -8); scene.add(rim);
+
+    const mat = (color: THREE.ColorRepresentation, roughness = .62, metalness = .05) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
+    const materials = {
+      bench: mat(0x40372f, .9), tile: mat(0xd9d5cc, .88), tileEdge: mat(0x8f8b83, .8), holder: mat(0x17191d, .66), pink: mat(0xd981a4, .38), pinkEdge: mat(0xb65377, .55), steel: mat(0xb8bec5, .25, .84), gold: mat(0xd1ae57, .32, .7), green: mat(0x1c7b50, .58, .18), blue: mat(0x2167ae, .52, .18), purple: mat(0x69459b, .5, .16), white: mat(0xe8e5dd, .76), black: mat(0x171b20, .35, .25), chip: mat(0x222830, .32, .36), cableRed: mat(0xc83930, .5), cableBlack: mat(0x171a1e, .48), wireBlue: mat(0x3182e8, .48), wireYellow: mat(0xe7b83c, .48), wireOrange: mat(0xe5822e, .48), wireGreen: mat(0x29975b, .48), wirePurple: mat(0x8e56b8, .48), wireGray: mat(0x91959b, .5), fan: mat(0x242a30, .46, .2), resistor: mat(0xcaa448, .38, .35), wood: mat(0x74553c, .84), probe: mat(0xa6b0b8, .34, .7), resistorBody: mat(0xd2bd93, .48, .14), pcbBlack: mat(0x20252c, .32, .25), led: mat(0x53d68a, .23, .08), red: mat(0xc6443c, .55), blueStripe: mat(0x466ca7, .55),
     };
-
-    // Four visible cylindrical cells with holders, terminal caps and serial labels.
-    const pack = new THREE.Group(); pack.position.set(-6.6, 1.0, 0); pack.userData.componentId = "pack";
-    const cellMat = CELL_COLORS.map((color) => mat(color, .28, .42, 0x123c68));
-    for (let i = 0; i < 4; i++) {
-      const x = -1.38 + i * .92;
-      const cradle = addMesh(pack, new THREE.BoxGeometry(.83, .19, 1.34), mat(0x303b49, .78, .12), new THREE.Vector3(x, -.48, 0)); cradle.userData.componentId = "pack";
-      const cell = addMesh(pack, new THREE.CylinderGeometry(.34, .34, 1.48, 32), cellMat[i]!, new THREE.Vector3(x, 0, 0)); cell.rotation.z = Math.PI / 2; cell.userData.componentId = "pack";
-      for (const dx of [-.76, .76]) addMesh(pack, new THREE.CylinderGeometry(.12, .12, .06, 20), mat(0xc0c8d1, .2, .82), new THREE.Vector3(x + dx, 0, 0));
-      const text = labelSprite(`CELL ${i + 1}  ·  ${(sample.cell_v[i] ?? 4.1).toFixed(2)} V`); text.position.set(x, .56, .48); text.scale.set(1.55, .3, 1); pack.add(text);
-    }
-    const packLabel = labelSprite("4S1P  ·  DMEGC INR18650-26E"); packLabel.position.set(0, .94, -.2); packLabel.scale.set(2.9, .42, 1); pack.add(packLabel); scene.add(pack);
-
-    // Electronics and protection boards.
-    makeBoard("bms", new THREE.Vector3(-6.5, .58, -2.6), new THREE.Vector3(2.35, .18, 1.55), 0x1d704e, "4S BMS  ·  40 A");
-    makeBoard("divider", new THREE.Vector3(-3.7, .55, 3.25), new THREE.Vector3(2.65, .16, .88), 0x28734b, "CELL TAP DIVIDERS");
-    makeBoard("adsA", new THREE.Vector3(-1.2, .58, 3.25), new THREE.Vector3(1.45, .18, 1.15), 0x176c7e, "ADS1115  ·  0x48");
-    makeBoard("adsB", new THREE.Vector3(.95, .58, 3.25), new THREE.Vector3(1.45, .18, 1.15), 0x176c7e, "ADS1115  ·  0x49");
-    makeBoard("inaPack", new THREE.Vector3(-.1, .6, 0), new THREE.Vector3(1.55, .18, 1.25), 0x24546a, "INA226  ·  PACK");
-    makeBoard("inaLoad", new THREE.Vector3(3.25, .6, -.9), new THREE.Vector3(1.55, .18, 1.25), 0x24546a, "INA226  ·  LOAD");
-    makeBoard("dac", new THREE.Vector3(3.05, .58, 3.25), new THREE.Vector3(1.5, .18, 1.2), 0x187453, "MCP4725 DAC");
-    makeBoard("opAmp", new THREE.Vector3(5.05, .58, 3.25), new THREE.Vector3(1.7, .18, 1.2), 0x187453, "LM358 CONTROL");
-    makeBoard("pi", new THREE.Vector3(7.35, .6, 3.15), new THREE.Vector3(2.05, .2, 1.6), 0x237047, "RASPBERRY PI 5");
-
-    // Pack fuse, charger and relay.
-    const fuse = new THREE.Group(); fuse.position.set(-3.8, .78, 0); fuse.userData.componentId = "fuse";
-    addMesh(fuse, new THREE.BoxGeometry(1.45, .26, .5), mat(0x29333d, .4, .35), new THREE.Vector3(0, 0, 0));
-    const glass = addMesh(fuse, new THREE.CylinderGeometry(.13, .13, .86, 20), mat(0xd9e8f0, .16, .5), new THREE.Vector3(0, .25, 0)); glass.rotation.z = Math.PI / 2; glass.material.transparent = true; glass.material.opacity = .78;
-    const fuseLabel = labelSprite("5 A ATO FUSE"); fuseLabel.position.set(0, .76, 0); fuse.add(fuseLabel); scene.add(fuse);
-    const charger = new THREE.Group(); charger.position.set(-6.5, .72, -4.4); charger.userData.componentId = "charger";
-    addMesh(charger, new THREE.BoxGeometry(2.45, .82, 1.65), mat(0x3c4652, .52, .3), new THREE.Vector3(0, 0, 0));
-    addMesh(charger, new THREE.BoxGeometry(.5, .36, .12), mat(0x151a20, .38, .3), new THREE.Vector3(.66, .05, .87));
-    const chargerLabel = labelSprite("CHARGER  ·  16.8 V / 2 A"); chargerLabel.position.set(0, .83, 0); chargerLabel.scale.set(2.5, .42, 1); charger.add(chargerLabel); scene.add(charger);
-    const relay = new THREE.Group(); relay.position.set(-1.8, .8, 0); relay.userData.componentId = "relay";
-    addMesh(relay, new THREE.BoxGeometry(1.12, .78, .98), mat(0x405369, .54, .25), new THREE.Vector3(0, 0, 0));
-    addMesh(relay, new THREE.BoxGeometry(.55, .12, .12), mat(0xd5dce4, .26, .68), new THREE.Vector3(0, .43, 0));
-    const relayLabel = labelSprite("CHARGE RELAY"); relayLabel.position.set(0, .86, 0); relay.add(relayLabel); scene.add(relay);
-
-    // Shared fan-cooled sink, TO-220 power MOSFET and ceramic load resistor.
-    const sink = new THREE.Group(); sink.position.set(5.8, .56, -.76); sink.userData.componentId = "heatsink";
-    addMesh(sink, new THREE.BoxGeometry(2.75, .2, 3.0), mat(0x75818d, .28, .82), new THREE.Vector3(0, 0, 0));
-    for (let i = -5; i <= 5; i++) addMesh(sink, new THREE.BoxGeometry(.12, .52, 2.65), mat(0x626e7a, .32, .78), new THREE.Vector3(i * .22, .34, 0));
-    const fan = new THREE.Group(); fan.position.set(.88, .68, .84); fan.userData.componentId = "heatsink";
-    const fanRing = addMesh(fan, new THREE.TorusGeometry(.44, .08, 10, 32), mat(0x293541, .38, .58), new THREE.Vector3(0, 0, 0)); fanRing.rotation.x = Math.PI / 2;
-    const hub = addMesh(fan, new THREE.CylinderGeometry(.15, .15, .16, 20), mat(0x414e5c, .36, .55), new THREE.Vector3(0, .04, 0));
-    for (let i = 0; i < 5; i++) { const blade = addMesh(fan, new THREE.BoxGeometry(.12, .08, .45), mat(0x536170, .38, .46), new THREE.Vector3(0, .08, -.25)); blade.rotation.y = i * Math.PI * .4; }
-    fan.userData.fanGroup = fan; sink.add(fan); void fanRing; void hub; scene.add(sink);
-    const resistor = new THREE.Group(); resistor.position.set(5.8, 1.22, -1.55); resistor.userData.componentId = "resistor";
-    const resistorBody = addMesh(resistor, new THREE.BoxGeometry(1.95, .58, .85), mat(0xe1e4e7, .68, .1), new THREE.Vector3(0, 0, 0)); resistorBody.userData.componentId = "resistor";
-    addMesh(resistor, new THREE.BoxGeometry(1.48, .04, .045), mat(0x647184, .55, .14), new THREE.Vector3(0, .3, 0));
-    const resLabel = labelSprite("10 Ω  ·  50 W"); resLabel.position.set(0, .53, 0); resistor.add(resLabel); scene.add(resistor);
-    const fet = new THREE.Group(); fet.position.set(5.8, 1.42, .14); fet.userData.componentId = "mosfet";
-    addMesh(fet, new THREE.BoxGeometry(.64, .68, .25), mat(0x20272e, .35, .38), new THREE.Vector3(0, .05, 0));
-    addMesh(fet, new THREE.BoxGeometry(.88, .12, .46), mat(0x87929e, .25, .8), new THREE.Vector3(0, .42, 0));
-    for (let i = -1; i <= 1; i++) addMesh(fet, new THREE.BoxGeometry(.08, .42, .08), mat(0xd1b968, .25, .72), new THREE.Vector3(i * .18, -.48, .03));
-    const fetLabel = labelSprite("IRLZ44N MOSFET"); fetLabel.position.set(0, .94, 0); fetLabel.scale.set(2.05, .4, 1); fet.add(fetLabel); scene.add(fet);
-
-    // Three temperature probes: cell, sink, and ambient/spare.
-    const probes = new THREE.Group(); probes.position.set(-4.95, 1.5, 1.05); probes.userData.componentId = "probes";
-    for (const [i, pos] of [[0, [-.55, 0, 0]], [1, [0, 0, -.3]], [2, [.55, 0, .05]]] as const) {
-      const probe = addMesh(probes, new THREE.CylinderGeometry(.12, .12, .36, 18), mat(i === 1 ? 0xffaa45 : 0x68d391, .3, .42, i === 1 ? 0x52200a : 0x123c21), new THREE.Vector3(pos[0], pos[1], pos[2]));
-      probe.rotation.z = .36; probe.userData.componentId = "probes";
-      const wire = addMesh(probes, new THREE.CylinderGeometry(.025, .025, .65, 8), mat(0x5d6671, .58, .3), new THREE.Vector3(pos[0], -.27, pos[2])); wire.rotation.z = -.28;
-    }
-    const probeLabel = labelSprite("3 × DS18B20"); probeLabel.position.set(0, .48, .2); probes.add(probeLabel); scene.add(probes);
-
-    const pathCurves: Array<{ curve: THREE.CatmullRomCurve3; color: number; particles: THREE.Mesh[]; speed: number }> = [];
-    const addPath = (points: Array<[number, number, number]>, color: number, count: number, speed: number) => {
-      const curve = new THREE.CatmullRomCurve3(points.map(([x, y, z]) => new THREE.Vector3(x, y, z)));
-      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, .035, 8, false), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .68 })); scene.add(tube);
-      const particles: THREE.Mesh[] = [];
-      for (let i = 0; i < count; i++) { const particle = new THREE.Mesh(new THREE.SphereGeometry(.095, 12, 12), new THREE.MeshBasicMaterial({ color, toneMapped: false })); scene.add(particle); particles.push(particle); }
-      pathCurves.push({ curve, color, particles, speed });
+    const clickable: THREE.Object3D[] = []; const groups = new Map<ComponentId, THREE.Group>(); const labels = new Map<ComponentId, THREE.Sprite>();
+    const box = (parent: THREE.Object3D, id: ComponentId | undefined, size: [number, number, number], pos: [number, number, number], material: THREE.Material, pick = true) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material); mesh.position.set(...pos); mesh.castShadow = true; mesh.receiveShadow = true;
+      if (id) mesh.userData.componentId = id; parent.add(mesh); if (id && pick) clickable.push(mesh); return mesh;
     };
-    addPath([[-7, 1.7, 0], [-4.8, 1.45, 0], [-3.8, 1.25, 0], [-1.8, 1.25, 0], [-.1, 1.25, 0], [1.7, 1.35, -.25], [3.25, 1.3, -.9], [4.7, 1.35, -1.1], [5.8, 1.5, -.9], [5.8, 1.8, .15]], 0xff9f43, 8, .07);
-    addPath([[-6.5, 1.9, .25], [-5.5, 2.4, 1.35], [-3.7, 1.45, 3.25], [-1.2, 1.45, 3.25], [.95, 1.45, 3.25], [3.05, 1.45, 3.25], [5.05, 1.45, 3.25], [7.35, 1.45, 3.15]], 0x62b6ff, 7, .055);
-    addPath([[7.35, 1.55, 3.15], [6.5, 2.25, 2.0], [5.05, 1.35, 3.25], [3.05, 1.35, 3.25], [4.0, 1.8, 1.65], [5.8, 1.85, .2]], 0x69d6ad, 6, .09);
-    addPath([[-5.9, 1.95, .2], [-4.9, 2.5, 1.05], [-2.5, 1.45, 2.2], [1.3, 1.45, 2.6], [7.35, 1.55, 3.15]], 0xa78bfa, 5, .045);
-    const chargeRoute = new THREE.CatmullRomCurve3([new THREE.Vector3(-6.5, 1.12, -4.4), new THREE.Vector3(-4.3, 1.08, -3.3), new THREE.Vector3(-1.8, 1.12, -.55), new THREE.Vector3(-4.8, 1.55, -.2), new THREE.Vector3(-6.6, 1.8, 0)]);
-    scene.add(new THREE.Mesh(new THREE.TubeGeometry(chargeRoute, 48, .028, 7, false), new THREE.MeshBasicMaterial({ color: 0x8290a0, transparent: true, opacity: .55 })));
-
-    const clock = new THREE.Clock(); const fanGroup = sink.children.find((child) => child instanceof THREE.Group) as THREE.Group;
-    const animate = () => {
-      const t = clock.getElapsedTime(); controls.update();
-      const live = telemetryRef.current; const loadFactor = Math.max(.2, Math.min(1.6, (live?.ina1_current_a ?? 1) / .8));
-      for (const [lineIndex, line] of pathCurves.entries()) {
-        const active = lineIndex !== 2 || (live?.dac_code ?? 0) > 0;
-        line.particles.forEach((particle, i) => { const u = (t * line.speed * loadFactor + i / line.particles.length) % 1; particle.position.copy(line.curve.getPointAt(u)); particle.visible = active; });
+    const cyl = (parent: THREE.Object3D, id: ComponentId | undefined, rTop: number, rBottom: number, depth: number, pos: [number, number, number], material: THREE.Material, radial = 16, pick = true) => {
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBottom, depth, radial), material); mesh.position.set(...pos); mesh.castShadow = true; mesh.receiveShadow = true;
+      if (id) mesh.userData.componentId = id; parent.add(mesh); if (id && pick) clickable.push(mesh); return mesh;
+    };
+    const partGroup = (id: ComponentId, px: number, py: number, label: string, labelY = 2.2) => {
+      const group = new THREE.Group(); group.position.copy(layoutPoint(px, py)); group.userData.componentId = id; scene.add(group); groups.set(id, group);
+      const tag = labelSprite(label); tag.position.set(0, labelY, 0); group.add(tag); labels.set(id, tag); return group;
+    };
+    const board = (id: ComponentId, px: number, py: number, wMm: number, dMm: number, color: THREE.Material, label: string, chipCount = 1) => {
+      const group = partGroup(id, px, py, label, 1.45); box(group, id, [mm(wMm), .16, mm(dMm)], [0, .18, 0], color);
+      for (let n = 0; n < chipCount; n++) {
+        const x = (n - (chipCount - 1) / 2) * Math.min(mm(wMm) * .31, 1.1);
+        box(group, id, [Math.min(mm(wMm) * .25, .74), .14, Math.min(mm(dMm) * .3, .65)], [x, .33, 0], materials.chip);
       }
-      fanGroup.rotation.y = t * Math.max(.15, (live?.cell_temp_c ?? 25) / 28);
-      const hot = (live?.cell_temp_c ?? 25) > 45; fanGroup.children.forEach((child) => { if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial && child.material.emissive) child.material.emissive.set(hot ? 0x4c1307 : 0x101820); });
+      const pinCount = Math.min(Math.floor(wMm / 2.54), 16); const pinMat = materials.gold;
+      for (let n = 0; n < pinCount; n++) {
+        const x = -mm(wMm) * .43 + (pinCount > 1 ? n * (mm(wMm) * .86) / (pinCount - 1) : 0);
+        for (const z of [-mm(dMm) * .44, mm(dMm) * .44]) cyl(group, id, .035, .035, .23, [x, .01, z], pinMat, 6);
+      }
+      return group;
+    };
+    const tileCenter = layoutPoint(371, 697);
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(54, .28, 34), materials.wood); bench.position.copy(target); bench.position.y = -.36; bench.receiveShadow = true; bench.castShadow = true; scene.add(bench);
+    const tile = new THREE.Mesh(new THREE.BoxGeometry(20, .18, 20), materials.tile); tile.position.copy(tileCenter); tile.position.y = -.12; tile.receiveShadow = true; tile.castShadow = true; scene.add(tile);
+    for (const dx of [-9.8, 9.8]) { const seam = new THREE.Mesh(new THREE.BoxGeometry(.035, .012, 19.8), materials.tileEdge); seam.position.set(tileCenter.x + dx, -.02, tileCenter.z); scene.add(seam); }
+    for (const dz of [-9.8, 9.8]) { const seam = new THREE.Mesh(new THREE.BoxGeometry(19.8, .012, .035), materials.tileEdge); seam.position.set(tileCenter.x, -.02, tileCenter.z + dz); scene.add(seam); }
+
+    // 4S1P pack: holder and four individually wrapped cells at 18650 proportions.
+    const holder = partGroup("holder", 260, 610, "4S1P · ABS CELL HOLDER", 4.15);
+    box(holder, "holder", [8.6, .38, 7.8], [0, .19, 0], materials.holder);
+    const holderRim = mat(0x262a2f, .72);
+    for (const x of [-4.18, 4.18]) box(holder, "holder", [.22, .4, 7.75], [x, .38, 0], holderRim);
+    for (const z of [-3.78, 3.78]) box(holder, "holder", [8.35, .4, .22], [0, .38, z], holderRim);
+    const pack = partGroup("pack", 260, 610, "DMEGC INR18650-26E · 4S1P", 5.15);
+    const batteryXs = [-2.82, -.94, .94, 2.82];
+    batteryXs.forEach((x, index) => {
+      const cell = cyl(pack, "pack", mm(18.45) / 2, mm(18.45) / 2, mm(65.2), [x, .96, 0], materials.pink, 32); cell.rotation.x = Math.PI / 2;
+      for (const z of [-mm(65.2) / 2, mm(65.2) / 2]) {
+        const ring = cyl(pack, "pack", mm(18.45) / 2 + .015, mm(18.45) / 2 + .015, .06, [x, .96, z], materials.pinkEdge, 32); ring.rotation.x = Math.PI / 2;
+        const cap = cyl(pack, "pack", mm(15.5) / 2, mm(15.5) / 2, .035, [x, .96, z + (z > 0 ? .035 : -.035)], materials.steel, 24); cap.rotation.x = Math.PI / 2;
+      }
+      const button = cyl(pack, "pack", .23, .23, .10, [x, 1.02, 3.32], materials.steel, 20); button.rotation.x = Math.PI / 2;
+      const cradle = box(holder, "holder", [1.74, .14, 6.8], [x, .49, 0], holderRim, false); cradle.receiveShadow = true;
+      for (const end of [-1, 1]) {
+        const spring = cyl(holder, "holder", .16, .2, .18, [x, .62, end * 3.52], materials.steel, 12, false); spring.rotation.x = Math.PI / 2;
+      }
+      void index;
+    });
+    // Cell 2 probe and Kapton patch.
+    const patch = box(pack, undefined, [.58, .035, .7], [-.94, 1.91, .22], mat(0xd8b76c, .72), false); patch.rotation.y = -.13;
+    const cellProbe = partGroup("probes", 245, 590, "DS18B20 #1 · CELL 2", 3.05);
+    cyl(cellProbe, "probes", .18, .18, .62, [0, 1.92, .22], materials.probe, 20); box(cellProbe, "probes", [.14, .08, 1.1], [0, 1.85, -.35], materials.wireGray, false);
+
+    // Blue protection board, MOSFET bank and five-wire balance connector.
+    const bms = board("bms", 516, 570, 60, 45, materials.blue, "4S BMS · 40 A LISTING", 2);
+    for (let n = 0; n < 4; n++) box(bms, "bms", [.72, .1, .62], [-1.7 + n * 1.12, .34, .65], materials.pcbBlack);
+    box(bms, "bms", [1.4, .2, .55], [0, .34, -1.5], materials.white);
+    box(bms, "bms", [2.0, .3, .38], [1.55, .43, -1.55], materials.white);
+    for (let n = 0; n < 5; n++) cyl(bms, "bms", .045, .045, .45, [.83 + n * .36, .28, -1.45], materials.gold, 8);
+
+    // Charger brick, relay, fuse holder and XT60 pack connector.
+    const charger = partGroup("charger", 258, 239, "16.8 V · 2 A CHARGER", 4.0);
+    box(charger, "charger", [12, 1.85, 5.8], [0, .92, 0], materials.black);
+    box(charger, "charger", [2.8, .5, .45], [2.8, 1.05, 2.92], materials.steel, false);
+    const relay = board("relay", 570, 215, 50, 26, materials.blue, "5 V · 10 A RELAY", 1);
+    box(relay, "relay", [2.0, .28, 1.4], [-.7, .44, 0], materials.chip);
+    const fuse = partGroup("fuse", 486, 728, "5 A ATO FUSE", 2.0);
+    box(fuse, "fuse", [3.5, .5, 1.25], [0, .25, 0], materials.black);
+    box(fuse, "fuse", [1.5, .3, .82], [0, .62, 0], materials.red);
+    box(fuse, "fuse", [.65, .12, .54], [0, .84, 0], materials.gold);
+    const xt60 = partGroup("xt60", 615, 727, "XT60 PACK CONNECTOR", 1.75);
+    const xt = cyl(xt60, "xt60", .67, .72, 1.55, [0, .38, 0], materials.gold, 6); xt.rotation.x = Math.PI / 2;
+    box(xt60, "xt60", [1.25, .15, .28], [0, .72, .72], materials.cableRed);
+
+    // Two shunt-monitor modules, with their metal 2512 shunts visible.
+    const inaPack = board("inaPack", 725, 500, 25, 20, materials.purple, "INA226 · PACK · 0x40", 1);
+    box(inaPack, "inaPack", [.82, .11, .38], [.56, .43, 0], materials.steel); box(inaPack, "inaPack", [.18, .025, .42], [.56, .5, 0], materials.gold);
+    const inaLoad = board("inaLoad", 982, 500, 25, 20, materials.purple, "INA226 · LOAD · 0x41", 1);
+    box(inaLoad, "inaLoad", [.82, .11, .38], [.56, .43, 0], materials.steel); box(inaLoad, "inaLoad", [.18, .025, .42], [.56, .5, 0], materials.gold);
+
+    // Full-size 165 × 55 mm breadboard with a low-cost instanced tie-point field.
+    const breadboard = partGroup("breadboard", 922, 760, "165 × 55 mm BREADBOARD", 2.0);
+    box(breadboard, "breadboard", [16.5, .34, 5.5], [0, .17, 0], materials.white);
+    for (const z of [-2.25, -1.95, 1.95, 2.25]) box(breadboard, "breadboard", [15.6, .025, .035], [0, .35, z], z < 0 ? materials.red : materials.blueStripe, false);
+    const holeGeometry = new THREE.CylinderGeometry(.038, .038, .025, 7); const holeMesh = new THREE.InstancedMesh(holeGeometry, mat(0x85847f, .84), 854); const dummy = new THREE.Object3D(); let hole = 0;
+    for (const centerZ of [-.95, .95]) for (let col = 0; col < 61; col++) for (let row = 0; row < 5; row++) {
+      dummy.position.set(-7.5 + col * .25, .36, centerZ - .5 + row * .25); dummy.updateMatrix(); holeMesh.setMatrixAt(hole++, dummy.matrix);
+    }
+    for (const z of [-2.05, -2.32, 2.05, 2.32]) for (let col = 0; col < 61; col++) {
+      dummy.position.set(-7.5 + col * .25, .36, z); dummy.updateMatrix(); holeMesh.setMatrixAt(hole++, dummy.matrix);
+    }
+    holeMesh.count = hole; holeMesh.castShadow = false; holeMesh.receiveShadow = true; breadboard.add(holeMesh);
+    const divider = board("divider", 735, 775, 36, 13, materials.white, "1 MΩ / 200 kΩ TAP LADDER", 0);
+    for (let n = 0; n < 4; n++) {
+      const z = -.55 + n * .36;
+      const axial = cyl(divider, "divider", .12, .12, 1.0, [-1.05 + n * .67, .47, z], materials.resistorBody, 12); axial.rotation.z = Math.PI / 2;
+      for (let band = -1; band <= 1; band++) { const color = band === 0 ? (n % 2 ? materials.red : materials.pinkEdge) : materials.gold; const stripe = cyl(divider, "divider", .125, .125, .075, [-1.05 + n * .67 + band * .18, .47, z], color, 12); stripe.rotation.z = Math.PI / 2; }
+    }
+    board("adsA", 729, 716, 28, 18, materials.blue, "ADS1115 · 0x48", 1);
+    board("adsB", 824, 716, 28, 18, materials.blue, "ADS1115 · 0x49", 1);
+    board("dac", 922, 720, 24, 16, materials.green, "MCP4725 DAC", 1);
+    const opAmp = board("opAmp", 990, 720, 30, 18, materials.green, "LM358 · CONTROL", 1);
+    box(opAmp, "opAmp", [1.2, .14, .5], [0, .38, .65], materials.chip);
+    const breadboardPart = groups.get("breadboard")!;
+    // Axial resistors and DIP-8 LM358 on the breadboard.
+    for (let n = 0; n < 5; n++) {
+      const x = -4.5 + n * 1.28; const resistor = cyl(breadboardPart, "breadboard", .12, .12, .92, [x, .72, .15], materials.resistorBody, 12); resistor.rotation.z = Math.PI / 2;
+      const stripeColors = [materials.pinkEdge, materials.black, materials.gold];
+      for (let band = 0; band < 3; band++) { const stripe = cyl(breadboardPart, "breadboard", .125, .125, .075, [x - .21 + band * .2, .72, .15], stripeColors[band]!, 12); stripe.rotation.z = Math.PI / 2; }
+    }
+
+    // I²C hub board and a Raspberry Pi 5 scale model with recognizable connectors.
+    board("hub", 1080, 290, 30, 20, materials.blue, "I²C HUB", 1);
+    const pi = board("pi", 1340, 280, 85, 56, materials.green, "RASPBERRY PI 5 · 85 × 56 mm", 2);
+    box(pi, "pi", [2.2, .18, 2.2], [-1.1, .39, .6], materials.chip);
+    cyl(pi, "pi", .73, .73, .17, [-1.1, .51, .6], materials.fan, 32);
+    for (let pin = 0; pin < 20; pin++) cyl(pi, "pi", .035, .035, .42, [-3.55 + pin * .25, .28, -2.0], materials.gold, 6);
+    for (let port = 0; port < 4; port++) box(pi, "pi", [1.12, .63, .72], [2.5, .46, -1.55 + port * 1.05], port < 2 ? materials.steel : materials.black);
+    box(pi, "pi", [1.45, .6, .95], [-3.0, .45, 1.7], materials.black);
+
+    // Separate 12 V supply, extruded heatsink, TO-220 MOSFET, power resistor and fan.
+    const adapter = partGroup("adapter", 1050, 1050, "12 V ADAPTER", 3.1);
+    box(adapter, "adapter", [7.0, 1.25, 3.2], [0, .62, 0], materials.black);
+    box(adapter, "adapter", [1.2, .25, .65], [2.8, .65, 0], materials.steel, false);
+    const sink = partGroup("heatsink", 1360, 695, "LOAD HEATSINK · ALUMINIUM", 3.1);
+    box(sink, "heatsink", [8.0, .48, 8.7], [0, .24, 0], mat(0x87919a, .32, .82));
+    for (let n = -6; n <= 6; n++) box(sink, "heatsink", [.26, 1.05, 8.1], [n * .57, .96, 0], mat(0x68737d, .35, .76));
+    const mosfet = partGroup("mosfet", 1290, 655, "IRLZ44N · TO-220", 2.7);
+    box(mosfet, "mosfet", [1.0, 1.5, .42], [0, 1.62, 0], materials.pcbBlack);
+    box(mosfet, "mosfet", [1.25, .12, .95], [0, 1.95, -.07], materials.steel);
+    cyl(mosfet, "mosfet", .12, .12, .22, [0, 2.03, -.07], materials.black, 20);
+    for (let pin = -1; pin <= 1; pin++) box(mosfet, "mosfet", [.09, .64, .09], [pin * .22, 1.12, .18], materials.gold);
+    const resistor = partGroup("resistor", 1370, 690, "10 Ω · 50 W POWER RESISTOR", 2.8);
+    box(resistor, "resistor", [4.9, 1.5, 2.8], [0, 1.42, 0], materials.resistor);
+    box(resistor, "resistor", [4.1, .05, .12], [0, 2.2, -.35], materials.gold);
+    for (const x of [-1.8, 1.8]) { cyl(resistor, "resistor", .15, .15, .18, [x, 2.2, .85], materials.steel, 16); }
+    const fan = partGroup("fan", 1360, 950, "12 V FAN", 2.8);
+    const fanRing = new THREE.Mesh(new THREE.TorusGeometry(1.82, .16, 12, 48), materials.fan); fanRing.rotation.x = Math.PI / 2; fanRing.position.set(0, .62, 0); fanRing.castShadow = true; fan.add(fanRing);
+    cyl(fan, "fan", .42, .42, .35, [0, .72, 0], materials.steel, 24);
+    const fanBlades = new THREE.Group(); fanBlades.position.set(0, .72, 0); fan.add(fanBlades); fan.userData.fanBlades = fanBlades;
+    for (let blade = 0; blade < 7; blade++) { const vane = box(fanBlades, "fan", [.46, .13, 1.35], [0, .03, -1.05], materials.fan, false); vane.rotation.y = blade * Math.PI * 2 / 7; }
+    for (const x of [-1.55, 1.55]) for (const z of [-1.55, 1.55]) cyl(fan, "fan", .12, .12, .2, [x, .5, z], materials.steel, 12);
+
+    // Three separate stainless DS18B20 probes and fine grey lead paths.
+    const probes = groups.get("probes")!;
+    const sinkProbe = cyl(sink, "probes", .18, .18, 1.55, [-3.55, 1.25, 1.15], materials.probe, 20); sinkProbe.rotation.x = Math.PI / 2;
+    const ambient = new THREE.Group(); ambient.position.copy(layoutPoint(645, 1042)); ambient.userData.componentId = "probes"; scene.add(ambient);
+    cyl(ambient, "probes", .18, .18, 5.0, [0, .18, 0], materials.probe, 20);
+    const spare = cyl(probes, "probes", .15, .15, 2.3, [1.2, .38, -.4], materials.probe, 16); spare.rotation.x = Math.PI / 2;
+
+    const curves: Array<{ curve: THREE.CatmullRomCurve3; particles: THREE.Mesh[]; speed: number; active: () => boolean }> = [];
+    const makeRoute = (coords: Array<[number, number, number]>, material: THREE.Material, color: number, radius: number, count = 0, speed = .06, active: () => boolean = () => true, dashed = false) => {
+      const points = coords.map(([x, y, h]) => layoutPoint(x, y, h));
+      const curve = new THREE.CatmullRomCurve3(points, false, "centripetal", .35);
+      if (dashed) {
+        const steps = 96; const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(radius * 1.45, 6, 5), material, Math.ceil(steps / 4)); const o = new THREE.Object3D(); let n = 0;
+        for (let s = 0; s < steps; s += 4) { o.position.copy(curve.getPoint(s / (steps - 1))); o.updateMatrix(); dots.setMatrixAt(n++, o.matrix); }
+        dots.count = n; scene.add(dots);
+      } else { const wire = new THREE.Mesh(new THREE.TubeGeometry(curve, 96, radius, 7, false), material); wire.castShadow = true; wire.receiveShadow = true; scene.add(wire); }
+      const particles: THREE.Mesh[] = [];
+      for (let n = 0; n < count; n++) { const particle = new THREE.Mesh(new THREE.SphereGeometry(radius * 2.25, 10, 8), new THREE.MeshBasicMaterial({ color, toneMapped: false })); scene.add(particle); particles.push(particle); }
+      if (count) curves.push({ curve, particles, speed, active });
+    };
+    const wire = (c: Array<[number, number, number]>, m: THREE.Material, r = .075) => makeRoute(c, m, 0xeeeeee, r);
+    // Heavy pack leads and series path. Curves terminate at the drawn part terminals.
+    wire([[370, 516, 1.7], [370, 466, 1.65], [486, 466, 1.48], [486, 695, 1.42]], materials.cableRed, .12);
+    makeRoute([[486, 715, 1.42], [690, 715, 1.3], [690, 482, 1.3], [725, 482, 1.3], [830, 482, 1.25], [945, 482, 1.2], [982, 482, 1.16], [1215, 482, 1.1], [1215, 600, 1.05], [1330, 614, 1.02]], materials.cableRed, 0xff9f43, .12, 8, .07);
+    wire([[370, 704, 1.1], [370, 892, .85], [645, 892, .75], [645, 894, .7], [1238, 894, .8], [1238, 790, .95], [1325, 790, 1.0]], materials.cableBlack, .12);
+    wire([[725, 520, 1.15], [725, 560, 1.12], [982, 560, 1.1], [982, 520, 1.08]], materials.cableBlack, .105);
+    // Cell tap bundle from pack to the BMS and divider/ADC chain.
+    const tapYs = [520, 540, 560, 580];
+    tapYs.forEach((_, i) => wire([[210 + i * 28, 512, 1.42], [210 + i * 28, 410 + i * 14, 1.25], [660 + i * 7, 410 + i * 14, 1.15], [660 + i * 7, 555, 1.05]], materials.wireOrange, .045));
+    wire([[660, 576, 1.1], [676, 576, 1.08], [676, 760, 1.02], [735, 760, 1.0]], materials.wireOrange, .055);
+    wire([[735, 760, 1.0], [735, 650, 1.05], [729, 650, 1.03], [729, 716, 1.02]], materials.wireOrange, .05);
+    wire([[735, 760, 1.0], [824, 760, 1.05], [824, 716, 1.02]], materials.wireOrange, .05);
+    // I²C, control, relay and sensor wiring routed across the same component layout.
+    makeRoute([[1340, 305, 1.6], [1310, 380, 1.55], [1080, 380, 1.5], [1080, 310, 1.45], [920, 310, 1.42], [920, 620, 1.4], [729, 650, 1.35]], materials.wireBlue, 0x62b6ff, .055, 5, .055);
+    wire([[1310, 305, 1.48], [1280, 392, 1.42], [1098, 392, 1.4], [1098, 320, 1.38], [944, 320, 1.36], [944, 628, 1.32], [824, 650, 1.3]], materials.wireYellow, .05);
+    makeRoute([[1340, 324, 1.55], [1320, 410, 1.5], [1118, 410, 1.45], [1118, 650, 1.4], [990, 650, 1.35], [990, 720, 1.32], [1290, 650, 1.3]], materials.wireGreen, 0x69d6ad, .065, 5, .09);
+    makeRoute([[1340, 284, 1.65], [1210, 380, 1.6], [615, 380, 1.52], [570, 300, 1.5], [570, 228, 1.45]], materials.wirePurple, 0xa78bfa, .05, 4, .045);
+    wire([[245, 590, 2.05], [400, 430, 1.85], [1340, 430, 1.8], [1340, 290, 1.7]], materials.wireGray, .045);
+    wire([[1360, 695, 2.05], [1450, 585, 1.9], [1450, 400, 1.82], [1340, 400, 1.75]], materials.wireGray, .045);
+    wire([[645, 1042, 2.1], [645, 930, 1.92], [1340, 930, 1.85], [1340, 400, 1.75]], materials.wireGray, .045);
+    wire([[1050, 1038, 1.35], [1050, 916, 1.3], [1360, 916, 1.3], [1360, 950, 1.25]], materials.wireOrange, .075);
+    wire([[1050, 1038, 1.32], [982, 916, 1.28], [982, 740, 1.24], [990, 720, 1.22]], materials.wireOrange, .06);
+    // The charger path is drawn grey and stays electrically idle during a discharge.
+    wire([[258, 270, 1.25], [450, 270, 1.22], [570, 270, 1.18], [570, 228, 1.15], [615, 228, 1.12], [615, 510, 1.1], [370, 510, 1.05]], materials.wireGray, .075);
+
+    // Idle tie-point and component callout dots, plus selected-part labels.
+    labels.get("pack")!.visible = true;
+    const clock = new THREE.Clock();
+    const animate = () => {
+      const time = clock.getElapsedTime(); controls.update(); const live = telemetryRef.current;
+      const load = Math.max(.25, Math.min(1.6, (live?.ina1_current_a ?? 0) / .8));
+      for (const path of curves) path.particles.forEach((particle, index) => {
+        const u = (time * path.speed * load + index / path.particles.length) % 1; particle.position.copy(path.curve.getPointAt(u)); particle.visible = path.active();
+      });
+      const fanPart = groups.get("fan")?.userData.fanBlades as THREE.Group | undefined;
+      if (fanPart) fanPart.rotation.y = time * Math.max(.1, (live?.cell_temp_c ?? 25) / 20);
+      const hot = (live?.cell_temp_c ?? 25) > 45;
+      const resistorBody = groups.get("resistor")?.children.find((child) => child.type === "Mesh") as THREE.Mesh | undefined;
+      if (resistorBody?.material instanceof THREE.MeshStandardMaterial) resistorBody.material.emissive.set(hot ? 0x64240d : 0x000000);
       renderer.render(scene, camera);
     };
     renderer.setAnimationLoop(animate);
-    const resizeObserver = new ResizeObserver(() => { const w = host.clientWidth, h = host.clientHeight; if (!w || !h) return; camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h); }); resizeObserver.observe(host);
-    const raycaster = new THREE.Raycaster(); const pointer = new THREE.Vector2();
-    const onPointer = (event: PointerEvent) => { const rect = renderer.domElement.getBoundingClientRect(); pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1); raycaster.setFromCamera(pointer, camera); const hit = raycaster.intersectObjects(rayTargets, false)[0]?.object; const id = hit?.userData.componentId as ComponentId | undefined; if (id) window.dispatchEvent(new CustomEvent("rig-component-select", { detail: id })); };
-    renderer.domElement.addEventListener("pointerdown", onPointer);
-    const onSelect = (event: Event) => { const id = (event as CustomEvent<ComponentId>).detail; const part = PARTS.find((item) => item.id === id); if (part) controls.target.copy(part.location); };
-    window.addEventListener("rig-component-focus", onSelect);
+    const resizeObserver = new ResizeObserver(() => { const width = host.clientWidth, height = host.clientHeight; if (!width || !height) return; camera.aspect = width / height; fitCamera(); renderer.setSize(width, height); }); resizeObserver.observe(host);
+    const raycaster = new THREE.Raycaster(); const pointer = new THREE.Vector2(); let down: [number, number] | undefined;
+    const onDown = (event: PointerEvent) => { down = [event.clientX, event.clientY]; };
+    const onUp = (event: PointerEvent) => {
+      if (!down || Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 5) { down = undefined; return; }
+      down = undefined; const rect = renderer.domElement.getBoundingClientRect(); pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1); raycaster.setFromCamera(pointer, camera);
+      const id = raycaster.intersectObjects(clickable, false).find((hit) => hit.object.userData.componentId)?.object.userData.componentId as ComponentId | undefined;
+      if (id) window.dispatchEvent(new CustomEvent("rig-component-select", { detail: id }));
+    };
+    renderer.domElement.addEventListener("pointerdown", onDown); renderer.domElement.addEventListener("pointerup", onUp);
+    const onFocus = (event: Event) => {
+      const id = (event as CustomEvent<ComponentId>).detail; labels.forEach((label) => { label.visible = false; }); const activeLabel = labels.get(id); if (activeLabel) activeLabel.visible = true;
+      const part = groups.get(id);
+      if (part) { const viewDirection = camera.position.clone().sub(controls.target).normalize(); controls.target.copy(part.position); camera.position.copy(part.position).addScaledVector(viewDirection, 31); controls.update(); }
+    };
+    window.addEventListener("rig-component-focus", onFocus);
+    const onResetView = () => { controls.target.copy(target); fitCamera(); controls.update(); labels.forEach((label) => { label.visible = false; }); labels.get("pack")!.visible = true; };
+    window.addEventListener("rig-reset-view", onResetView);
+    const highlightInitial = window.setTimeout(() => { labels.forEach((label) => { label.visible = false; }); labels.get("pack")!.visible = true; }, 20);
     setSceneError("");
-    return () => { renderer.setAnimationLoop(null); resizeObserver.disconnect(); renderer.domElement.removeEventListener("pointerdown", onPointer); window.removeEventListener("rig-component-focus", onSelect); controls.dispose(); scene.traverse((obj) => { if (obj instanceof THREE.Mesh || obj instanceof THREE.Sprite) { obj.geometry?.dispose?.(); const mats = Array.isArray(obj.material) ? obj.material : [obj.material]; mats.forEach((material) => { if (material instanceof THREE.Material) { const map = (material as THREE.SpriteMaterial).map; map?.dispose(); material.dispose(); } }); } }); renderer.dispose(); renderer.domElement.remove(); };
+    return () => {
+      window.clearTimeout(highlightInitial); renderer.setAnimationLoop(null); resizeObserver.disconnect(); renderer.domElement.removeEventListener("pointerdown", onDown); renderer.domElement.removeEventListener("pointerup", onUp); window.removeEventListener("rig-component-focus", onFocus); window.removeEventListener("rig-reset-view", onResetView); controls.dispose();
+      scene.traverse((object) => { if (object instanceof THREE.Mesh || object instanceof THREE.Sprite || object instanceof THREE.InstancedMesh) { object.geometry?.dispose?.(); const material = object.material; (Array.isArray(material) ? material : [material]).forEach((item) => { if (item instanceof THREE.Material) { (item as THREE.SpriteMaterial).map?.dispose(); item.dispose(); } }); } }); renderer.dispose(); renderer.domElement.remove();
+    };
   }, []);
 
   const choose = (id: ComponentId) => { setSelected(id); window.dispatchEvent(new CustomEvent("rig-component-focus", { detail: id })); };
   const start = () => { if (playback.index >= result.samples.length - 1) playback.setIndex(0); playback.setPlaying(true); };
   const packVoltage = sample.cell_v.reduce((sum, voltage) => sum + voltage, 0);
   return <div className="rig-demo">
-    <div className="rig-demo-intro"><p>Explore the component-level rig in 3D. Play the provisional T7 model to watch simulated power, sensor and control signals move through the system.</p><span className="badge">Model-only · no rig required</span></div>
+    <div className="rig-demo-intro"><p>A scale-based 3D reconstruction from the supplied bench layout. Play the provisional T7 model to watch power and sensor signals move through the rig.</p><span className="badge">Model-only · no rig required</span></div>
     <section className="rig-screen panel">
-      <div className="rig-screen-head"><div><strong>4S battery management rig</strong><span>Conceptual component layout · not to scale</span></div><span className="rig-interaction-hint">Drag to orbit · scroll to zoom · select a part</span></div>
-      <div className="rig-stage" ref={hostRef} aria-label="Interactive Three.js model of the battery management rig" role="img"><div className="rig-scene-legend"><span><i className="power-key"/>T7 discharge</span><span><i className="sense-key"/>Sensor data</span><span><i className="control-key"/>Load control</span><span><i className="temp-key"/>Temperature</span><span><i className="charge-key"/>Charge route · idle</span></div>{sceneError && <div className="rig-webgl-error">{sceneError}</div>}<div className="rig-stage-caption">PROVISIONAL SIMULATION · 4S1P DMEGC PACK</div></div>
+      <div className="rig-screen-head"><div><strong>4S battery management rig</strong><span>Bench-layout reconstruction · 10 mm scene grid · estimated sizes marked</span></div><div className="rig-screen-actions"><span className="rig-interaction-hint">Drag to orbit · scroll to zoom · select a part</span><button className="rig-view-reset" onClick={() => window.dispatchEvent(new Event("rig-reset-view"))}>Reset view</button></div></div>
+      <div className="rig-stage" ref={hostRef} aria-label="Interactive Three.js reconstruction of the battery management rig" role="img"><div className="rig-scene-legend"><span><i className="power-key"/>Pack current</span><span><i className="sense-key"/>I²C data</span><span><i className="control-key"/>Load control</span><span><i className="temp-key"/>Temperature</span><span><i className="charge-key"/>Charge route · idle</span></div>{sceneError && <div className="rig-webgl-error">{sceneError}</div>}<div className="rig-stage-caption">4S1P · DMEGC INR18650-26E · PROVISIONAL MODEL</div></div>
       <div className="rig-telemetry"><div><span>Pack voltage</span><strong>{packVoltage.toFixed(2)} <small>V</small></strong></div><div><span>Discharge current</span><strong>{sample.ina1_current_a.toFixed(2)} <small>A</small></strong></div><div><span>Cell temperature</span><strong>{sample.cell_temp_c.toFixed(1)} <small>°C</small></strong></div><div><span>State of charge</span><strong>{(sample.true_soc * 100).toFixed(1)} <small>%</small></strong></div><div><span>Protection state</span><strong className={sample.bms_state === "normal" ? "rig-state-ok" : "rig-state-trip"}>{sample.software_uv_trip ? "UV cut-off" : sample.bms_state}</strong></div></div>
-      <div className="rig-playback"><div className="rig-playback-controls"><button className="button primary" onClick={playback.playing ? () => playback.setPlaying(false) : start}>{playback.playing ? "Pause" : playback.index >= result.samples.length - 1 ? "Replay T7" : "Play T7"}</button><button className="button secondary" onClick={() => { playback.setPlaying(false); playback.setIndex(0); }}>Reset</button><span>Time <strong>{sample.timestamp_s.toFixed(0)} s</strong> / {result.durationS} s</span></div><input aria-label="Simulation time" type="range" min="0" max={result.samples.length - 1} value={playback.index} onChange={(event) => { playback.setPlaying(false); playback.setIndex(Number(event.target.value)); }} /><p>Orange: pack discharge · Blue: tap and sensor data · Green: DAC load control · Purple: temperature telemetry</p></div>
+      <div className="rig-playback"><div className="rig-playback-controls"><button className="button primary" onClick={playback.playing ? () => playback.setPlaying(false) : start}>{playback.playing ? "Pause" : playback.index >= result.samples.length - 1 ? "Replay T7" : "Play T7"}</button><button className="button secondary" onClick={() => { playback.setPlaying(false); playback.setIndex(0); }}>Reset</button><span>Time <strong>{sample.timestamp_s.toFixed(0)} s</strong> / {result.durationS} s</span></div><input aria-label="Simulation time" type="range" min="0" max={result.samples.length - 1} value={playback.index} onChange={(event) => { playback.setPlaying(false); playback.setIndex(Number(event.target.value)); }} /><p>Red: pack current · Blue/yellow: I²C bus · Green: DAC control · Purple: relay · Grey: temperature leads</p></div>
     </section>
-    <div className="rig-detail-grid"><section className="panel rig-part-panel"><div className="panel-head"><h2>Components</h2><span>{PARTS.length} selectable component groups · includes all four cells and three probes</span></div><div className="rig-part-list">{PARTS.map((part) => <button key={part.id} className={`rig-part-button ${selected === part.id ? "selected" : ""}`} onClick={() => choose(part.id)}><span>{part.name}</span><small>{part.kind}</small></button>)}</div></section><section className="panel rig-part-detail"><span className="eyebrow">Selected component · {selectedPart.kind}</span><h2>{selectedPart.name}</h2><p>{selectedPart.description}</p><div className="rig-part-readout"><span>Current model reading</span><strong>{readingFor(selected, sample)}</strong></div></section></div>
-    <p className="rig-model-note">This is an interactive 3D model, not a CAD drawing. Shapes communicate the rig layout and signal flow; dimensions and board footprints are illustrative. The T7 values remain provisional until compared with the future physical build.</p>
+    <div className="rig-detail-grid"><section className="panel rig-part-panel"><div className="panel-head"><h2>Components</h2><span>{PARTS.length} selectable parts · including four cells and three probes</span></div><div className="rig-part-list">{PARTS.map((part) => <button key={part.id} className={`rig-part-button ${selected === part.id ? "selected" : ""}`} onClick={() => choose(part.id)}><span>{part.name}</span><small>{part.kind}</small></button>)}</div></section><section className="panel rig-part-detail"><span className="eyebrow">Selected component · {selectedPart.kind}</span><h2>{selectedPart.name}</h2><p>{selectedPart.description}</p><div className="rig-part-readout"><span>Current model reading</span><strong>{readingFor(selected, sample)}</strong></div></section></div>
+    <p className="rig-model-note">Reconstructed from the supplied top-down image; the 10 mm grid is used as the layout scale. Dimensions marked estimated and component textures are illustrative because photos and caliper measurements were not included. T7 values remain provisional until compared with the physical build.</p>
   </div>;
 }
 
@@ -222,21 +363,27 @@ function readingFor(id: ComponentId, sample: DischargeSample): string {
   const packV = sample.cell_v.reduce((sum, voltage) => sum + voltage, 0);
   switch (id) {
     case "pack": return `${packV.toFixed(2)} V · ${(sample.true_soc * 100).toFixed(1)}% SOC`;
+    case "holder": return "4 cells · series holder · 18 AWG pack leads";
     case "bms": return sample.bms_state === "normal" ? "Monitoring · no BMS trip" : `Protection state · ${sample.bms_state}`;
-    case "fuse": return "In series · trip behavior not simulated";
+    case "fuse": return "5 A path · trip behavior not simulated";
     case "charger": return "Idle · discharge scenario";
     case "relay": return "Charge path · not switching in T7";
+    case "xt60": return "Pack connector · current path shown";
     case "divider": return `Four tap channels · ${sample.tap_v[3].toFixed(2)} V highest tap`;
     case "adsA": return `CH0 ${sample.adc_codes[0]} · CH1 ${sample.adc_codes[1]} counts`;
     case "adsB": return `CH0 ${sample.adc_codes[2]} · CH1 ${sample.adc_codes[3]} counts`;
     case "inaPack": return `${sample.ina1_current_a.toFixed(3)} A · ${sample.ina1_bus_v.toFixed(2)} V`;
     case "inaLoad": return `${sample.ina2_current_a.toFixed(3)} A · ${sample.ina2_bus_v.toFixed(2)} V`;
+    case "hub": return "I²C routing junction · bus timing simplified";
+    case "pi": return `T7 telemetry · ${sample.timestamp_s.toFixed(0)} s`;
+    case "breadboard": return "ADC · DAC · op-amp · divider circuit";
     case "dac": return `Code ${sample.dac_code} · ${sample.requested_current_a.toFixed(2)} A requested`;
     case "opAmp": return "Load control active · analog response simplified";
+    case "heatsink": return `${sample.cell_temp_c.toFixed(1)} °C cell reading · sink transient not modeled`;
+    case "fan": return "12 V supply · fan spins during playback";
     case "mosfet": return sample.ina1_current_a > 0 ? "Conducting · load active" : "Off · load disconnected";
     case "resistor": return `Dissipating ≈ ${(packV * sample.ina1_current_a).toFixed(1)} W · idealized`;
-    case "heatsink": return "Cooling layout shown · thermal transient omitted";
-    case "pi": return `T7 telemetry · ${sample.timestamp_s.toFixed(0)} s`;
+    case "adapter": return "12 V fan/control supply · provisional layout";
     case "probes": return `${sample.cell_temp_c.toFixed(1)} °C cell · ${sample.ambient_c.toFixed(1)} °C ambient`;
   }
 }
