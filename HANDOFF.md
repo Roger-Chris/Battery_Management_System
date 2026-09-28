@@ -18,10 +18,10 @@ Node 22, Python 3.14 (no scipy installed — `tools/fit_cell_profile.py` is nump
 default Windows cp1252 console encoding crashes on the ✓/µ/Ω/≤ characters both scripts print.
 `package.json`'s `validate:design` script and `.github/workflows/ci.yml` already do this.
 
-**No local git repo is present** (`git status` reports that this directory is not a repository).
-The provided GitHub URL did not advertise a HEAD/ref when checked, so no remote branch could be
-cloned or attached. Nothing has been committed or pushed; this working directory is the current
-copy of the work.
+**GitHub is connected.** The previously empty `Roger-Chris/Battery_Management_System` repository
+now has the complete project on `main`; the workspace folder itself still has no local `.git`
+metadata. The GitHub commit history is the shared remote copy. Localhost demo runs from this
+workspace using `npm run dev`.
 
 ## What's done
 
@@ -155,7 +155,11 @@ has not been published: this workspace has no Git repository or linked Vercel pr
   limited to 900 seconds.
 - Connect the browser UI to physical BLE hardware only after the simulation behavior is finalized.
 
-## Open questions for the user (do not guess these — CLAUDE.md rule 3)
+## Hardware details to resolve when building the rig
+The user does not have a physical rig yet and plans to build one after trying this simulation.
+Do not block the model-only demo on these details; keep any unverified hardware values marked as
+provisional and update them when parts are selected or measured.
+
 From `CLAUDE_CODE_PROMPT.md`'s "Ask me, do not guess" list, still unanswered as of this handoff:
 - MCP4725 I2C address as reported by `i2cdetect` (0x60 assumed, some modules are 0x62 — VERIFY).
 - The charger's measured open-circuit voltage (test T0a).
@@ -192,3 +196,4 @@ provisional values to verified BOM data without checking the installed rig.
   keeping it rather than batching multiple phases silently.
 - Every constant added must carry `source`/`ref` per `Parameter<T>` in
   `src/core/config/provenance.ts` — do not add a bare number to any model file.
+
