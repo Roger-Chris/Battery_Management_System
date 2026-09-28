@@ -15,6 +15,7 @@ import { evaluateProtection } from "../firmware/protection";
 import { chargeRelayCommand, commandedChargeCurrentA } from "../firmware/chargeControl";
 import { CHARGER_MAX_CURRENT_A, CHARGER_SETPOINT_V, clampChargeCurrentA, isConstantVoltagePhase } from "../hardware/charger";
 import { initialBmsState, stepBmsMonitor } from "../hardware/bmsBoard";
+import { codeToTemperature, temperatureToCode } from "../hardware/ds18b20";
 
 export type ChargerPhase = "cc" | "cv" | "cutoff";
 export type ChargeCutoffReason = "cell temperature limit" | "cell over-voltage" | "charge complete" | "BMS over-voltage";
@@ -90,11 +91,12 @@ export function runChargeSimulation(settings: ChargeSimulationSettings): ChargeS
       : requestedCurrentA;
     const proposedCellV = cellVoltages(state, -proposedCurrentA, profile);
     const hottestCellC = Math.max(...thermal.map((cell) => cell.surfC));
+    const measuredCellTempC = codeToTemperature(temperatureToCode(hottestCellC), 12);
     const proposedProtection = evaluateProtection({
       cellVoltagesV: proposedCellV,
       loadCurrentA: 0,
       heatsinkC: ambientC,
-      cellTempC: hottestCellC,
+      cellTempC: measuredCellTempC,
     });
 
     if (cutoffReason === null && proposedProtection.chargeOverTemp) cutoffReason = "cell temperature limit";
