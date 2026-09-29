@@ -385,9 +385,13 @@ export default function RigScene3D() {
     wire([[645, 1042, 2.1], [645, 930, 1.92], [1340, 930, 1.85], [1340, 400, 1.75]], materials.wireGray, .045);
     wire([[1050, 1038, 1.35], [1050, 916, 1.3], [1360, 916, 1.3], [1360, 950, 1.25]], materials.wireOrange, .075);
     wire([[1050, 1038, 1.32], [982, 916, 1.28], [982, 740, 1.24], [990, 720, 1.22]], materials.wireOrange, .06);
-    // The charger path is drawn grey; animated charge particles appear only while its relay is closed.
+    // The charger path is drawn grey; stop animated charge particles at relay cutoff or fire ignition.
     wire([[258, 270, 1.25], [450, 270, 1.22], [570, 270, 1.18], [570, 228, 1.15], [615, 228, 1.12], [615, 510, 1.1], [370, 510, 1.05]], materials.wireGray, .075);
-    makeRoute([[258, 270, 1.3], [450, 270, 1.25], [570, 270, 1.22], [570, 228, 1.2], [615, 228, 1.18], [615, 510, 1.14], [370, 510, 1.1]], materials.wirePurple, 0xffcf70, .08, 8, .12, () => telemetryRef.current?.charge_relay_closed ?? false);
+    makeRoute([[258, 270, 1.3], [450, 270, 1.25], [570, 270, 1.22], [570, 228, 1.2], [615, 228, 1.18], [615, 510, 1.14], [370, 510, 1.1]], materials.wirePurple, 0xffcf70, .08, 8, .12, () => {
+      const live = telemetryRef.current;
+      const fireIgnited = runawayDemoRef.current && live?.mode === "charge" && live.cell_core_temp_c >= FIRE_IGNITION_TEMP_C;
+      return Boolean(live?.charge_relay_closed && !fireIgnited);
+    });
 
     // Idle tie-point and component callout dots, plus selected-part labels.
     labels.get("pack")!.visible = true;
