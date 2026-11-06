@@ -10,4 +10,3 @@ The prompt-style `SCENE_PROMPT.md` inside the supplied archive was treated as re
 The scene uses the explicit dimensions listed in the supplied notes for the 18650 cells, holder, breadboard, Raspberry Pi, heatsink resistor and Pi board where available. Other module footprints and placements are estimates read from the top-down drawing. No phone photos, exact module measurements or bench measurements were included, so surface artwork, connector details and estimated dimensions remain illustrative. Replace those estimates when the parts are available for measurement.
 
 Scene scale is 1 world unit per 10 mm. The top-down image is mapped using its approximate 30-pixel grid spacing; this reproduces the overall layout but does not establish surveyed coordinates or electrical pin locations. The wire routes follow the drawn colour-coded paths and remain a visual reconstruction, not an authoritative manufacturing netlist.
-
